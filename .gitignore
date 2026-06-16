@@ -1,2 +1,4 @@
 .env
 gateway.db
+cmd/gateway.db
+fly.toml

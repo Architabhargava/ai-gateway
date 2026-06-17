@@ -49,19 +49,18 @@ func New(l *logger.Logger) *Dashboard {
 	return &Dashboard{log: l}
 }
 
-// HandlePlatform serves the unified platform UI — all features in one page
+// HandlePlatform serves the unified platform — all features in one page
 func (d *Dashboard) HandlePlatform(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(platformHTML))
 }
 
-// HandleHome serves the chat UI (kept for /ai route compatibility)
+// HandleHome redirects to platform
 func (d *Dashboard) HandleHome(w http.ResponseWriter, r *http.Request) {
-	// Redirect to the platform
 	http.Redirect(w, r, "/platform", http.StatusFound)
 }
 
-// HandleDashboard serves audit log data as JSON for the platform to consume
+// HandleDashboard returns audit log data — JSON for platform, HTML fallback
 func (d *Dashboard) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 	search := strings.TrimSpace(r.URL.Query().Get("search"))
 	riskFilter := strings.TrimSpace(r.URL.Query().Get("risk"))
@@ -106,7 +105,6 @@ func (d *Dashboard) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 	stats := d.getStats(allLogs)
 	buckets := d.getHourlyBuckets(allLogs)
 
-	// If request accepts HTML, render dashboard page (legacy support)
 	accept := r.Header.Get("Accept")
 	if strings.Contains(accept, "text/html") {
 		data := struct {
@@ -117,8 +115,7 @@ func (d *Dashboard) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 			Search     string
 			RiskFilter string
 		}{logs, stats, buckets, time.Now().Format("2006-01-02 15:04:05"), search, riskFilter}
-
-		tmpl, err := template.New("dashboard").Parse(legacyDashboardHTML)
+		tmpl, err := template.New("d").Parse(`<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body><script>window.location.href='/platform'</script><p>Redirecting to <a href="/platform">platform</a>...</p></body></html>`)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -128,7 +125,6 @@ func (d *Dashboard) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Default: return JSON for the platform UI to consume
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"logs":    logs,
@@ -151,18 +147,13 @@ func (d *Dashboard) HandleStats(w http.ResponseWriter, r *http.Request) {
 func (d *Dashboard) HandleReviewPage(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/platform#review", http.StatusFound)
 }
-
 func (d *Dashboard) HandleIncidentsPage(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/platform#incidents", http.StatusFound)
 }
-
 func (d *Dashboard) HandleRetentionPage(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/platform#retention", http.StatusFound)
 }
-
-func (d *Dashboard) HandleNotFound(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintln(w, "404 — not found")
-}
+func (d *Dashboard) HandleNotFound(w http.ResponseWriter, r *http.Request) { fmt.Fprintln(w, "404") }
 
 func (d *Dashboard) getStats(logs []logger.AuditLog) Stats {
 	stats := Stats{Total: len(logs)}
@@ -201,12 +192,6 @@ func (d *Dashboard) getHourlyBuckets(logs []logger.AuditLog) []HourBucket {
 	return buckets
 }
 
-const legacyDashboardHTML = `<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>Dashboard</title></head>
-<body><script>window.location.href='/platform'</script>
-<p>Redirecting to <a href="/platform">the platform</a>...</p>
-</body></html>`
-
 const platformHTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -236,7 +221,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .status-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#16a34a;margin-right:6px;animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
 
-/* ── Main area ── */
+/* ── Main ── */
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden}
 .topbar{background:#111119;border-bottom:1px solid #1e1e2e;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .topbar-title{font-size:15px;font-weight:500;color:#fff}
@@ -249,7 +234,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .page{display:none;height:100%}
 .page.active{display:flex;flex-direction:column;height:100%}
 
-/* ── Chat page ── */
+/* ── Chat ── */
 .chat-layout{display:flex;flex:1;overflow:hidden}
 .chat-history{width:220px;background:#0d0d18;border-right:1px solid #1e1e2e;padding:12px;overflow-y:auto;flex-shrink:0}
 .chat-history-title{font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:#444;margin-bottom:10px;padding:0 4px}
@@ -276,7 +261,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .suggestion-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .suggestion{background:#111119;border:1px solid #1e1e2e;border-radius:8px;padding:10px 12px;font-size:12px;color:#888;cursor:pointer;text-align:left}
 .suggestion:hover{border-color:#4f46e5;color:#fff;background:#1e1e40}
-.msg{display:flex;flex-direction:column;gap:5px;max-width:680px}
+.msg{display:flex;flex-direction:column;gap:5px;max-width:700px}
 .msg.user{align-self:flex-end;align-items:flex-end}
 .msg.assistant{align-self:flex-start;align-items:flex-start}
 .bubble{padding:10px 14px;border-radius:10px;font-size:13px;line-height:1.7}
@@ -285,7 +270,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .msg.blocked-msg .bubble{background:#1f0a0a;border:1px solid #450a0a;color:#f87171}
 .msg-meta{font-size:10px;color:#444;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .reasoning-btn{font-size:11px;color:#4f46e5;background:none;border:none;padding:0;cursor:pointer}
-.reasoning-content{background:#0a0a14;border:1px solid #1e1e2e;border-radius:6px;padding:8px 12px;font-size:11px;color:#666;line-height:1.6;margin-top:3px;display:none;max-width:600px}
+.reasoning-content{background:#0a0a14;border:1px solid #1e1e2e;border-radius:6px;padding:8px 12px;font-size:11px;color:#666;line-height:1.6;margin-top:3px;display:none;max-width:620px}
 .reasoning-content.open{display:block}
 .typing{display:flex;gap:4px;align-items:center;padding:10px 14px;background:#1a1a28;border-radius:10px;border:1px solid #2a2a3e;border-bottom-left-radius:3px}
 .dot{width:6px;height:6px;border-radius:50%;background:#4f46e5;animation:bounce 1.2s infinite}
@@ -321,18 +306,18 @@ textarea::placeholder{color:#3a3a4e}
 .stat-card.s-high .stat-val{color:#f87171}
 .stat-card.s-unacceptable .stat-val{color:#f472b6}
 .chart-card{background:#111119;border:1px solid #1e1e2e;border-radius:10px;padding:16px;margin-bottom:20px}
-.chart-title{font-size:12px;color:#555;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.06em}
+.chart-title{font-size:11px;color:#555;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.06em}
 .bar-chart{display:flex;align-items:flex-end;gap:4px;height:60px}
 .bar-col{display:flex;flex-direction:column;align-items:center;flex:1;gap:3px}
 .bar-fill{width:100%;background:#4f46e5;border-radius:2px 2px 0 0;min-height:2px}
 .bar-lbl{font-size:9px;color:#444}
 .toolbar-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;flex-wrap:wrap}
-.toolbar-title{font-size:12px;font-weight:500;color:#888;text-transform:uppercase;letter-spacing:0.06em}
-.search-row{display:flex;gap:6px}
+.toolbar-title{font-size:11px;font-weight:500;color:#666;text-transform:uppercase;letter-spacing:0.06em}
+.search-row{display:flex;gap:6px;flex-wrap:wrap}
 .search-row input,.search-row select{background:#111119;border:1px solid #2a2a3e;border-radius:6px;padding:6px 10px;font-size:12px;color:#ccc;outline:none}
 .search-row input:focus,.search-row select:focus{border-color:#4f46e5}
 .search-row button{padding:6px 12px;background:#4f46e5;color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer}
-.clear-link{font-size:12px;color:#555;cursor:pointer;padding:6px 8px;text-decoration:none}
+.clear-link{font-size:12px;color:#555;cursor:pointer;padding:6px 8px}
 .table-wrap{background:#111119;border:1px solid #1e1e2e;border-radius:10px;overflow:hidden;overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:11px;min-width:800px}
 thead{background:#0d0d18}
@@ -354,7 +339,7 @@ tr:hover td{background:#0f0f1a}
 .detail-a:hover{text-decoration:underline}
 .empty-state{text-align:center;padding:40px;color:#444;font-size:13px}
 
-/* ── Review queue ── */
+/* ── Review ── */
 .review-item{background:#111119;border:1px solid #2a2a3e;border-radius:10px;padding:16px;margin-bottom:10px}
 .review-item.urgent{border-left:3px solid #f87171}
 .ri-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;gap:10px}
@@ -363,9 +348,8 @@ tr:hover td{background:#0f0f1a}
 .cat-badge{font-size:10px;padding:2px 8px;border-radius:12px;font-weight:500}
 .cat-data_extraction{background:#1a2a4e;color:#93c5fd}
 .cat-identity_manipulation{background:#2a1a4e;color:#c4b5fd}
-.cat-prompt_injection{background:#2a1a1a;color:#fca5a5}
-.cat-jailbreak{background:#2a0a0a;color:#f87171}
-.cat-harmful_content{background:#3a0a0a;color:#f87171}
+.cat-prompt_injection,.cat-jailbreak,.cat-harmful_content{background:#2a0a0a;color:#f87171}
+.cat-safe{background:#0a2a1a;color:#4ade80}
 .score-b{font-size:10px;padding:2px 8px;border-radius:12px}
 .score-h{background:#3a1010;color:#f87171}.score-m{background:#3a3010;color:#fbbf24}.score-l{background:#0a2a1a;color:#4ade80}
 .expires-b{font-size:10px;color:#f87171}
@@ -391,7 +375,6 @@ tr:hover td{background:#0f0f1a}
 .incident-card.medium{border-left:3px solid #fbbf24}
 .incident-card.low{border-left:3px solid #4ade80}
 .incident-card.resolved{opacity:0.5}
-.inc-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;gap:10px}
 .sev-b{font-size:10px;padding:2px 8px;border-radius:12px;font-weight:500}
 .sev-critical{background:#4a0a2e;color:#f472b6}
 .sev-high{background:#450a0a;color:#f87171}
@@ -408,37 +391,46 @@ tr:hover td{background:#0f0f1a}
 .filter-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
 .filter-btn{padding:5px 12px;background:#111119;border:1px solid #2a2a3e;border-radius:14px;font-size:11px;color:#666;cursor:pointer}
 .filter-btn.active{border-color:#4f46e5;color:#fff;background:#1e1e40}
-.inc-stats{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:16px}
 
-/* ── Retention ── */
+/* ── Retention / Keys shared card ── */
 .retention-card{background:#111119;border:1px solid #2a2a3e;border-radius:10px;padding:20px;margin-bottom:14px}
 .rc-title{font-size:14px;font-weight:500;color:#fff;margin-bottom:4px}
 .rc-sub{font-size:12px;color:#555;line-height:1.5;margin-bottom:16px}
-.ret-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
 .form-grp{margin-bottom:12px}
 .form-lbl{font-size:11px;color:#666;margin-bottom:5px;display:block}
 .form-inp{width:100%;background:#0a0a12;border:1px solid #2a2a3e;border-radius:6px;padding:8px 12px;font-size:13px;color:#e0e0e0;outline:none}
 .form-inp:focus{border-color:#4f46e5}
-.form-row{display:flex;gap:8px;align-items:flex-end}
+.form-row{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
 .btn-primary{padding:8px 16px;background:#4f46e5;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:500;cursor:pointer}
-.btn-primary:hover{background:#4338ca}.btn-primary:disabled{background:#2a2a3e;cursor:not-allowed}
+.btn-primary:hover{background:#4338ca}
 .btn-warn{padding:8px 16px;background:#7c2d12;color:#fff;border:none;border-radius:7px;font-size:12px;cursor:pointer}
 .btn-warn:hover{background:#9a3412}
 .btn-danger{padding:8px 16px;background:#450a0a;color:#f87171;border:1px solid #7f1d1d;border-radius:7px;font-size:12px;cursor:pointer}
 .btn-danger:hover{background:#7f1d1d;color:#fff}
 .warn-box{background:#1f1000;border:1px solid #4a3000;border-radius:6px;padding:10px 12px;font-size:11px;color:#fbbf24;line-height:1.5;margin-bottom:12px}
-.result-box{background:#0a0a12;border:1px solid #2a2a3e;border-radius:6px;padding:10px 12px;margin-top:10px;font-size:12px;color:#4ade80;line-height:1.5;display:none}
+.result-box{background:#0a0a12;border:1px solid #2a2a3e;border-radius:6px;padding:10px 12px;margin-top:10px;font-size:12px;color:#4ade80;line-height:1.5;display:none;word-break:break-all}
 .result-box.error{color:#f87171}
 .result-box.show{display:block}
 .info-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #1e1e2e;font-size:12px}
 .info-row:last-child{border-bottom:none}
 .info-lbl{color:#555}
-.info-val{color:#aaa;font-family:monospace}
+.info-val{color:#aaa;font-family:monospace;font-size:11px}
+.ret-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
+
+/* ── Key status badges ── */
+.ks-active{display:inline-block;padding:2px 7px;border-radius:12px;font-size:10px;background:#14532d;color:#4ade80}
+.ks-revoked{display:inline-block;padding:2px 7px;border-radius:12px;font-size:10px;background:#450a0a;color:#f87171}
+.ks-suspended{display:inline-block;padding:2px 7px;border-radius:12px;font-size:10px;background:#3a2a00;color:#fbbf24}
+.ks-expired{display:inline-block;padding:2px 7px;border-radius:12px;font-size:10px;background:#1e1e28;color:#666}
+.key-action-btn{padding:3px 8px;border-radius:4px;font-size:10px;cursor:pointer;border:none}
+.ka-suspend{background:#3a2a00;color:#fbbf24;border:1px solid #4a3800}
+.ka-revoke{background:#450a0a;color:#f87171;border:1px solid #7f1d1d}
+.ka-activate{background:#14532d;color:#4ade80;border:1px solid #16a34a}
 </style>
 </head>
 <body>
 
-<!-- Sidebar -->
+<!-- ── Sidebar ── -->
 <div class="sidebar">
   <div class="sidebar-logo">
     <h1>AI Gateway</h1>
@@ -465,6 +457,10 @@ tr:hover td{background:#0f0f1a}
     </button>
 
     <div class="nav-section">Compliance</div>
+    <button class="nav-item" onclick="showPage('keys')" id="nav-keys">
+      <i class="ti ti-key nav-icon" aria-hidden="true"></i> API Keys
+      <span class="nav-badge warn" id="keys-count" style="display:none">0</span>
+    </button>
     <button class="nav-item" onclick="showPage('retention')" id="nav-retention">
       <i class="ti ti-database nav-icon" aria-hidden="true"></i> Retention &amp; GDPR
     </button>
@@ -474,17 +470,17 @@ tr:hover td{background:#0f0f1a}
   </div>
 </div>
 
-<!-- Main -->
+<!-- ── Main ── -->
 <div class="main">
   <div class="topbar">
     <span class="topbar-title" id="page-title">Chat</span>
     <div class="topbar-right">
-      <input class="key-input" id="apiKey" type="password" placeholder="X-API-Key..." />
+      <input class="key-input" id="apiKey" type="password" placeholder="X-API-Key (gw_...)"/>
     </div>
   </div>
   <div class="content">
 
-    <!-- ── CHAT PAGE ── -->
+    <!-- ══ CHAT ══ -->
     <div class="page active" id="page-chat" style="flex-direction:column">
       <div class="chat-layout">
         <div class="chat-history">
@@ -496,7 +492,7 @@ tr:hover td{background:#0f0f1a}
             <div class="welcome-screen" id="welcome">
               <span class="eu-compliance-badge">EU AI Act — Articles 5, 9, 13, 14, 52</span>
               <h2>AI Gateway Platform</h2>
-              <p>Every request is authenticated, classified with full reasoning chain, risk-scored against the EU AI Act, and logged with complete auditability.</p>
+              <p>Every request is authenticated with a managed API key, classified with full reasoning chain, risk-scored against the EU AI Act, and logged with complete auditability.</p>
               <div class="suggestion-grid">
                 <button class="suggestion" onclick="useSug(this)">What is machine learning?</button>
                 <button class="suggestion" onclick="useSug(this)">Explain Docker in simple terms</button>
@@ -512,20 +508,20 @@ tr:hover td{background:#0f0f1a}
                 <svg viewBox="0 0 24 24"><path d="M2 21L23 12 2 3v7l15 2-15 2z"/></svg>
               </button>
             </div>
-            <div class="input-hint">Enter to send · Shift+Enter for new line</div>
+            <div class="input-hint">Enter to send &nbsp;·&nbsp; Shift+Enter for new line</div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- ── AUDIT LOG PAGE ── -->
+    <!-- ══ AUDIT LOG ══ -->
     <div class="page" id="page-audit">
       <div class="panel-page">
         <div class="panel-header">
           <p class="panel-title">Audit Log</p>
-          <p class="panel-sub">Complete record of every request with reasoning chain, risk level, and EU AI Act article citations.</p>
+          <p class="panel-sub">Complete record of every request — reasoning chain, risk level, EU AI Act article citations, and classifier scores.</p>
         </div>
-        <div class="stats-grid" id="auditStats">
+        <div class="stats-grid">
           <div class="stat-card s-total"><div class="stat-val" id="as-total">—</div><div class="stat-lbl">Total</div></div>
           <div class="stat-card s-allowed"><div class="stat-val" id="as-allowed">—</div><div class="stat-lbl">Allowed</div></div>
           <div class="stat-card s-blocked"><div class="stat-val" id="as-blocked">—</div><div class="stat-lbl">Blocked</div></div>
@@ -535,7 +531,7 @@ tr:hover td{background:#0f0f1a}
         </div>
         <div class="chart-card">
           <div class="chart-title">Requests by hour (last 24h)</div>
-          <div class="bar-chart" id="auditChart"><div class="empty-state" style="padding:10px;color:#444;font-size:11px">No data yet</div></div>
+          <div class="bar-chart" id="auditChart"><div style="color:#444;font-size:11px;text-align:center;padding:10px;width:100%">No data yet</div></div>
         </div>
         <div class="toolbar-row">
           <span class="toolbar-title">Recent requests</span>
@@ -549,7 +545,7 @@ tr:hover td{background:#0f0f1a}
               <option value="unacceptable">Unacceptable</option>
             </select>
             <button onclick="loadAudit()">Filter</button>
-            <a class="clear-link" onclick="clearAudit()">Clear</a>
+            <span class="clear-link" onclick="clearAudit()">Clear</span>
           </div>
         </div>
         <div class="table-wrap">
@@ -564,12 +560,12 @@ tr:hover td{background:#0f0f1a}
       </div>
     </div>
 
-    <!-- ── REVIEW QUEUE PAGE ── -->
+    <!-- ══ REVIEW QUEUE ══ -->
     <div class="page" id="page-review">
       <div class="panel-page">
         <div class="panel-header">
           <p class="panel-title">Human Review Queue <span class="article-tag">Article 14</span></p>
-          <p class="panel-sub">Borderline and sensitive-category requests held for human judgment. Approve to forward to Groq, reject to block. Items expire in 5 minutes and block by default.</p>
+          <p class="panel-sub">Borderline and sensitive-category requests held for human judgment. Approve to forward to Groq. Reject to block. Items expire in 5 minutes and block by default.</p>
         </div>
         <div class="stats-grid" style="grid-template-columns:repeat(4,1fr)">
           <div class="stat-card s-error"><div class="stat-val" id="rv-pending">—</div><div class="stat-lbl">Pending</div></div>
@@ -584,14 +580,14 @@ tr:hover td{background:#0f0f1a}
       </div>
     </div>
 
-    <!-- ── INCIDENTS PAGE ── -->
+    <!-- ══ INCIDENTS ══ -->
     <div class="page" id="page-incidents">
       <div class="panel-page">
         <div class="panel-header">
           <p class="panel-title">Security Incidents</p>
           <p class="panel-sub">Every high-confidence block, Article 5 violation, and human rejection creates an incident. Critical and high severity trigger email alerts via Resend.</p>
         </div>
-        <div class="inc-stats">
+        <div class="stats-grid">
           <div class="stat-card s-total"><div class="stat-val" id="inc-total">—</div><div class="stat-lbl">Total</div></div>
           <div class="stat-card s-blocked"><div class="stat-val" id="inc-unresolved">—</div><div class="stat-lbl">Unresolved</div></div>
           <div class="stat-card s-unacceptable"><div class="stat-val" id="inc-critical">—</div><div class="stat-lbl">Critical</div></div>
@@ -610,7 +606,75 @@ tr:hover td{background:#0f0f1a}
       </div>
     </div>
 
-    <!-- ── RETENTION PAGE ── -->
+    <!-- ══ API KEYS ══ -->
+    <div class="page" id="page-keys">
+      <div class="panel-page">
+        <div class="panel-header">
+          <p class="panel-title">API Key Management</p>
+          <p class="panel-sub">Issue, revoke, suspend, and monitor gateway API keys. Each customer or team gets their own key with individual rate limits and usage tracking. The full key value is shown only once on creation — just like OpenAI, Anthropic, and Stripe.</p>
+        </div>
+        <div class="stats-grid" style="grid-template-columns:repeat(5,1fr)">
+          <div class="stat-card s-total"><div class="stat-val" id="ks-total">—</div><div class="stat-lbl">Total</div></div>
+          <div class="stat-card s-allowed"><div class="stat-val" id="ks-active">—</div><div class="stat-lbl">Active</div></div>
+          <div class="stat-card s-error"><div class="stat-val" id="ks-suspended">—</div><div class="stat-lbl">Suspended</div></div>
+          <div class="stat-card s-blocked"><div class="stat-val" id="ks-revoked">—</div><div class="stat-lbl">Revoked</div></div>
+          <div class="stat-card s-total"><div class="stat-val" id="ks-expired">—</div><div class="stat-lbl">Expired</div></div>
+        </div>
+
+        <!-- Generate form -->
+        <div class="retention-card">
+          <p class="rc-title">Generate new key</p>
+          <p class="rc-sub">Each key is cryptographically random (24 bytes) with a <code style="color:#a5b4fc;font-size:11px">gw_</code> prefix. The full key value is displayed only once on creation.</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:12px">
+            <div class="form-grp" style="margin-bottom:0">
+              <label class="form-lbl">Name *</label>
+              <input class="form-inp" id="kName" placeholder="Team Alpha"/>
+            </div>
+            <div class="form-grp" style="margin-bottom:0">
+              <label class="form-lbl">Owner / email</label>
+              <input class="form-inp" id="kOwner" placeholder="alice@company.com"/>
+            </div>
+            <div class="form-grp" style="margin-bottom:0">
+              <label class="form-lbl">Rate limit req/min (0 = default 5)</label>
+              <input class="form-inp" type="number" id="kRateLimit" value="0" min="0"/>
+            </div>
+            <div class="form-grp" style="margin-bottom:0">
+              <label class="form-lbl">Expires in days (0 = never)</label>
+              <input class="form-inp" type="number" id="kExpires" value="0" min="0"/>
+            </div>
+          </div>
+          <button class="btn-primary" onclick="generateKey()">Generate key</button>
+          <div class="result-box" id="keyResult"></div>
+        </div>
+
+        <!-- Keys table -->
+        <div class="toolbar-row">
+          <span class="toolbar-title">All keys</span>
+          <div class="search-row">
+            <select id="keyStatusFilter" onchange="loadKeys()">
+              <option value="">All statuses</option>
+              <option value="active">Active</option>
+              <option value="suspended">Suspended</option>
+              <option value="revoked">Revoked</option>
+              <option value="expired">Expired</option>
+            </select>
+            <button onclick="loadKeys()">Refresh</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table style="min-width:900px">
+            <thead><tr>
+              <th>#</th><th>Key (masked)</th><th>Name</th><th>Owner</th>
+              <th>Status</th><th>Rate limit</th><th>Requests</th><th>Blocks</th>
+              <th>Last used</th><th>Expires</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="keysBody"><tr><td colspan="11" class="empty-state">Loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ RETENTION ══ -->
     <div class="page" id="page-retention">
       <div class="panel-page">
         <div class="panel-header">
@@ -620,29 +684,29 @@ tr:hover td{background:#0f0f1a}
 
         <div class="retention-card" id="retentionStatus">
           <p class="rc-title">Current policy</p>
-          <p class="rc-sub">Loading...</p>
+          <p class="rc-sub" style="color:#444">Loading...</p>
         </div>
 
         <div class="retention-card">
           <p class="rc-title">Update retention period</p>
-          <p class="rc-sub">Records older than this many days are automatically deleted during the nightly purge. Unresolved incidents are always kept.</p>
+          <p class="rc-sub">Records older than this many days are automatically deleted during the nightly purge. Unresolved incidents are always kept regardless of age.</p>
           <div class="form-row">
             <div class="form-grp" style="flex:1">
-              <label class="form-lbl">Retention days</label>
+              <label class="form-lbl">Retention days (1–3650)</label>
               <input class="form-inp" type="number" id="retDays" min="1" max="3650" value="90"/>
             </div>
             <div class="form-grp" style="flex:0.6">
               <label class="form-lbl">Updated by</label>
               <input class="form-inp" type="text" id="retUpdatedBy" value="admin"/>
             </div>
-            <button class="btn-primary" onclick="updateRetention()">Update</button>
+            <button class="btn-primary" style="align-self:flex-end;margin-bottom:12px" onclick="updateRetention()">Update</button>
           </div>
           <div class="result-box" id="retResult"></div>
         </div>
 
         <div class="retention-card">
           <p class="rc-title">Manual purge</p>
-          <p class="rc-sub">Immediately purge all records older than the current retention period. Same as the nightly scheduled purge.</p>
+          <p class="rc-sub">Immediately purge all records older than the current retention period. Same operation as the nightly scheduled purge.</p>
           <button class="btn-warn" onclick="triggerPurge()">Run purge now</button>
           <div class="result-box" id="purgeResult"></div>
         </div>
@@ -654,30 +718,30 @@ tr:hover td{background:#0f0f1a}
           <div class="form-row">
             <div class="form-grp" style="flex:1">
               <label class="form-lbl">API key to erase</label>
-              <input class="form-inp" type="text" id="eraseKey" placeholder="key-alpha-123" style="font-family:monospace"/>
+              <input class="form-inp" type="text" id="eraseKey" placeholder="gw_..." style="font-family:monospace"/>
             </div>
-            <button class="btn-danger" onclick="eraseData()" id="eraseBtn">Erase all data</button>
+            <button class="btn-danger" style="align-self:flex-end;margin-bottom:12px" onclick="eraseData()" id="eraseBtn">Erase all data</button>
           </div>
           <div class="result-box" id="eraseResult"></div>
         </div>
       </div>
     </div>
 
-  </div>
-</div>
+  </div><!-- /.content -->
+</div><!-- /.main -->
 
 <script>
-// ── State ──────────────────────────────────────────────────────────────────
+// ── State ─────────────────────────────────────────────────────────────────
 const chatHistory = [];
 let incFilter = '';
 let deciding = {};
 let resolving = {};
 let pollIntervals = {};
 
-// ── Navigation ─────────────────────────────────────────────────────────────
+// ── Navigation ────────────────────────────────────────────────────────────
 const pageTitles = {
-  chat: 'Chat', audit: 'Audit Log',
-  review: 'Review Queue', incidents: 'Incidents', retention: 'Retention & GDPR'
+  chat: 'Chat', audit: 'Audit Log', review: 'Review Queue',
+  incidents: 'Incidents', keys: 'API Keys', retention: 'Retention & GDPR'
 };
 
 function showPage(id) {
@@ -685,72 +749,70 @@ function showPage(id) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('page-' + id).classList.add('active');
   document.getElementById('nav-' + id).classList.add('active');
-  document.getElementById('page-title').textContent = pageTitles[id];
+  document.getElementById('page-title').textContent = pageTitles[id] || id;
 
   if (id === 'audit')     loadAudit();
-  if (id === 'review')    loadReview();
-  if (id === 'incidents') loadIncidents();
+  if (id === 'review')    { loadReview(); if (!pollIntervals.review) pollIntervals.review = setInterval(loadReview, 3000); }
+  if (id === 'incidents') { loadIncidents(); if (!pollIntervals.incidents) pollIntervals.incidents = setInterval(loadIncidents, 5000); }
+  if (id === 'keys')      loadKeys();
   if (id === 'retention') loadRetention();
 
-  // Stop polling other pages
-  Object.keys(pollIntervals).forEach(k => { if (k !== id) { clearInterval(pollIntervals[k]); delete pollIntervals[k]; }});
-
-  if (id === 'review' && !pollIntervals.review) {
-    pollIntervals.review = setInterval(loadReview, 3000);
-  }
-  if (id === 'incidents' && !pollIntervals.incidents) {
-    pollIntervals.incidents = setInterval(loadIncidents, 5000);
-  }
+  Object.keys(pollIntervals).forEach(k => {
+    if (k !== id) { clearInterval(pollIntervals[k]); delete pollIntervals[k]; }
+  });
 }
 
-// Check URL hash on load
-(function() {
-  const hash = location.hash.replace('#','');
-  if (['audit','review','incidents','retention'].includes(hash)) showPage(hash);
-})();
-
-// ── Helpers ────────────────────────────────────────────────────────────────
-function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function trunc(s, n) { return s && s.length > n ? s.substring(0, n) + '…' : (s||''); }
-function scoreClass(v) { return v >= 0.7 ? 'score-h' : v >= 0.4 ? 'score-m' : 'score-l'; }
-function timeUntil(exp) {
-  const diff = Math.max(0, Math.floor((new Date(exp.replace(' ','T')+'Z') - Date.now()) / 1000));
-  if (!diff) return 'expired';
-  return diff >= 60 ? Math.floor(diff/60)+'m '+diff%60+'s' : diff+'s';
-}
-
-// ── Periodic badge refresh ─────────────────────────────────────────────────
+// ── Sidebar badge refresh ─────────────────────────────────────────────────
 async function refreshBadges() {
   try {
-    const [rv, inc] = await Promise.all([
-      fetch('/admin/review/stats').then(r=>r.json()),
-      fetch('/admin/incidents/stats').then(r=>r.json())
+    const [rv, inc, ks] = await Promise.all([
+      fetch('/admin/review/stats').then(r => r.json()).catch(() => ({})),
+      fetch('/admin/incidents/stats').then(r => r.json()).catch(() => ({})),
+      fetch('/admin/keys/stats').then(r => r.json()).catch(() => ({}))
     ]);
-    const rp = rv.stats?.pending || 0;
-    const el = document.getElementById('review-count');
-    el.textContent = rp; el.style.display = rp ? '' : 'none';
-    const iu = inc.stats?.unresolved || 0;
-    const el2 = document.getElementById('incident-count');
-    el2.textContent = iu; el2.style.display = iu ? '' : 'none';
-  } catch(e){}
-}
-refreshBadges(); setInterval(refreshBadges, 10000);
 
-// ── CHAT ───────────────────────────────────────────────────────────────────
+    const rp = rv.stats?.pending || 0;
+    const rc = document.getElementById('review-count');
+    rc.textContent = rp; rc.style.display = rp ? '' : 'none';
+
+    const iu = inc.stats?.unresolved || 0;
+    const ic = document.getElementById('incident-count');
+    ic.textContent = iu; ic.style.display = iu ? '' : 'none';
+
+    const ksus = ks.stats?.suspended || 0;
+    const kc = document.getElementById('keys-count');
+    kc.textContent = ksus; kc.style.display = ksus ? '' : 'none';
+  } catch (e) {}
+}
+refreshBadges();
+setInterval(refreshBadges, 10000);
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function esc(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function trunc(s, n) { return s && s.length > n ? s.substring(0, n) + '…' : (s || ''); }
+function scoreClass(v) { return v >= 0.7 ? 'score-h' : v >= 0.4 ? 'score-m' : 'score-l'; }
+function timeUntil(exp) {
+  if (!exp) return 'expired';
+  const diff = Math.max(0, Math.floor((new Date(exp.replace(' ', 'T') + 'Z') - Date.now()) / 1000));
+  if (!diff) return 'expired';
+  return diff >= 60 ? Math.floor(diff / 60) + 'm ' + diff % 60 + 's' : diff + 's';
+}
+
+// ── CHAT ──────────────────────────────────────────────────────────────────
 const ta = document.getElementById('prompt');
-ta.addEventListener('input', () => { ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,100)+'px'; });
-ta.addEventListener('keydown', e => { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();} });
+ta.addEventListener('input', () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 100) + 'px'; });
+ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } });
 function useSug(btn) { ta.value = btn.textContent; ta.focus(); }
 function getKey() { return document.getElementById('apiKey').value.trim(); }
 
-function removeWelcome() { const w=document.getElementById('welcome'); if(w) w.remove(); }
+function removeWelcome() { const w = document.getElementById('welcome'); if (w) w.remove(); }
 
 function addMsg(role, text, meta) {
   removeWelcome();
   const msgs = document.getElementById('messages');
   const div = document.createElement('div');
-  let cls = 'msg '+role;
-  if (meta?.status==='blocked') cls += ' blocked-msg';
+  let cls = 'msg ' + role;
+  if (meta?.status === 'blocked') cls += ' blocked-msg';
   div.className = cls;
 
   const bubble = document.createElement('div');
@@ -762,9 +824,9 @@ function addMsg(role, text, meta) {
     const m = document.createElement('div');
     m.className = 'msg-meta';
     m.innerHTML = new Date().toLocaleTimeString();
-    if (meta.status) m.innerHTML += ' · <span class="b '+meta.status+'">'+meta.status+'</span>';
-    if (meta.risk_level) m.innerHTML += ' · <span class="r-sm r-'+meta.risk_level+'">'+meta.risk_level+' risk</span>';
-    if (meta.eu_article) m.innerHTML += ' · '+esc(meta.eu_article);
+    if (meta.status) m.innerHTML += ' · <span class="b ' + meta.status + '">' + meta.status + '</span>';
+    if (meta.risk_level) m.innerHTML += ' · <span class="r-sm r-' + meta.risk_level + '">' + meta.risk_level + ' risk</span>';
+    if (meta.eu_article) m.innerHTML += ' · ' + esc(meta.eu_article);
     div.appendChild(m);
 
     if (meta.reasoning_chain) {
@@ -774,8 +836,12 @@ function addMsg(role, text, meta) {
       const box = document.createElement('div');
       box.className = 'reasoning-content';
       box.textContent = meta.reasoning_chain;
-      btn.onclick = () => { box.classList.toggle('open'); btn.textContent = box.classList.contains('open') ? 'Hide reasoning ↑' : 'View reasoning ↓'; };
-      div.appendChild(btn); div.appendChild(box);
+      btn.onclick = () => {
+        box.classList.toggle('open');
+        btn.textContent = box.classList.contains('open') ? 'Hide reasoning ↑' : 'View reasoning ↓';
+      };
+      div.appendChild(btn);
+      div.appendChild(box);
     }
   }
   msgs.appendChild(div);
@@ -786,28 +852,31 @@ function addTyping(review) {
   removeWelcome();
   const msgs = document.getElementById('messages');
   const div = document.createElement('div');
-  div.className = 'msg assistant'; div.id = 'typing-indicator';
+  div.className = 'msg assistant';
+  div.id = 'typing-indicator';
   if (review) {
-    div.innerHTML = '<div class="review-waiting"><div class="spinner"></div>Waiting for human review — <span style="cursor:pointer;color:#fbbf24;font-weight:500;text-decoration:underline" onclick="showPage(\'review\')">open review queue</span> to decide</div>';
+    div.innerHTML = '<div class="review-waiting"><div class="spinner"></div>Waiting for human review — <span style="cursor:pointer;color:#fbbf24;font-weight:500;text-decoration:underline" onclick="showPage(\'review\')">open review queue</span></div>';
   } else {
     div.innerHTML = '<div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>';
   }
-  msgs.appendChild(div); msgs.scrollTop = msgs.scrollHeight;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
 }
 
-function removeTyping() { const t=document.getElementById('typing-indicator'); if(t)t.remove(); }
+function removeTyping() { const t = document.getElementById('typing-indicator'); if (t) t.remove(); }
 
 function addToHistory(prompt, status, risk) {
-  chatHistory.unshift({prompt,status,risk});
+  chatHistory.unshift({ prompt, status, risk });
   const list = document.getElementById('chatHistory');
   list.innerHTML = '';
-  chatHistory.slice(0,20).forEach((item,i)=>{
+  chatHistory.slice(0, 20).forEach((item, i) => {
     const div = document.createElement('div');
-    div.className = 'history-item'+(i===0?' active':'');
-    div.innerHTML = '<div class="h-prompt">'+esc(item.prompt)+'</div>' +
-      '<div class="h-meta"><span class="b-sm '+item.status+'">'+item.status+'</span>' +
-      (item.risk?'<span class="r-sm r-'+item.risk+'">'+item.risk+'</span>':'')+'</div>';
-    div.onclick = () => { ta.value=item.prompt; ta.focus(); };
+    div.className = 'history-item' + (i === 0 ? ' active' : '');
+    div.innerHTML =
+      '<div class="h-prompt">' + esc(item.prompt) + '</div>' +
+      '<div class="h-meta"><span class="b-sm ' + item.status + '">' + item.status + '</span>' +
+      (item.risk ? '<span class="r-sm r-' + item.risk + '">' + item.risk + '</span>' : '') + '</div>';
+    div.onclick = () => { ta.value = item.prompt; ta.focus(); };
     list.appendChild(div);
   });
 }
@@ -816,50 +885,54 @@ async function sendMsg() {
   const prompt = ta.value.trim();
   if (!prompt) return;
   const key = getKey();
-  if (!key) { alert('Enter your API key in the top bar.\n\nValid keys: key-alpha-123, key-beta-456, key-gamma-789'); return; }
+  if (!key) {
+    alert('Enter your API key in the top bar.\n\nGenerate one in the API Keys section, or use the keys from your .env file.');
+    return;
+  }
 
-  ta.value=''; ta.style.height='auto';
+  ta.value = ''; ta.style.height = 'auto';
   document.getElementById('sendBtn').disabled = true;
   addMsg('user', prompt, null);
 
-  const likely = ['repeat','instructions','system prompt','told','pretend','inject'].some(w=>prompt.toLowerCase().includes(w));
-  addTyping(likely);
+  const likelySensitive = ['repeat', 'instructions', 'system prompt', 'told', 'pretend', 'inject', 'context'].some(w => prompt.toLowerCase().includes(w));
+  addTyping(likelySensitive);
 
   try {
     const res = await fetch('/ai', {
-      method:'POST',
-      headers:{'Content-Type':'application/json','X-API-Key':key},
-      body: JSON.stringify({prompt})
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': key },
+      body: JSON.stringify({ prompt })
     });
     const data = await res.json();
     removeTyping();
 
-    if (res.status===401) {
-      addMsg('assistant','Invalid or missing API key.',{status:'error'});
-      addToHistory(prompt,'error',null);
-    } else if (res.status===451) {
-      addMsg('assistant','Blocked — EU AI Act Article 5 violation\n\n'+data.reason,{status:'blocked',risk_level:'unacceptable',eu_article:data.article});
-      addToHistory(prompt,'blocked','unacceptable');
-    } else if (res.status===403) {
-      addMsg('assistant','Blocked: '+data.reason,{status:'blocked',risk_level:data.risk_level,eu_article:data.eu_article,reasoning_chain:data.reasoning_chain});
-      addToHistory(prompt,'blocked',data.risk_level);
+    if (res.status === 401) {
+      addMsg('assistant', 'Unauthorized: ' + (data.reason || 'invalid API key'), { status: 'error' });
+      addToHistory(prompt, 'error', null);
+    } else if (res.status === 451) {
+      addMsg('assistant', 'Blocked — EU AI Act Article 5 violation\n\n' + data.reason, { status: 'blocked', risk_level: 'unacceptable', eu_article: data.article });
+      addToHistory(prompt, 'blocked', 'unacceptable');
+    } else if (res.status === 403) {
+      addMsg('assistant', 'Blocked: ' + data.reason, { status: 'blocked', risk_level: data.risk_level, eu_article: data.eu_article, reasoning_chain: data.reasoning_chain });
+      addToHistory(prompt, 'blocked', data.risk_level);
     } else if (res.ok) {
-      addMsg('assistant',data.response,{status:'allowed',risk_level:data.risk_level});
-      addToHistory(prompt,'allowed',data.risk_level);
+      addMsg('assistant', data.response, { status: 'allowed', risk_level: data.risk_level });
+      addToHistory(prompt, 'allowed', data.risk_level);
     } else {
-      addMsg('assistant','Error: '+(data.reason||'something went wrong'),{status:'error'});
-      addToHistory(prompt,'error',null);
+      addMsg('assistant', 'Error: ' + (data.reason || 'something went wrong'), { status: 'error' });
+      addToHistory(prompt, 'error', null);
     }
-  } catch(err) {
+  } catch (err) {
     removeTyping();
-    addMsg('assistant','Could not reach the gateway.',{status:'error'});
-    addToHistory(prompt,'error',null);
+    addMsg('assistant', 'Could not reach the gateway. Is it running?', { status: 'error' });
+    addToHistory(prompt, 'error', null);
   }
-  document.getElementById('sendBtn').disabled=false;
+
+  document.getElementById('sendBtn').disabled = false;
   ta.focus();
 }
 
-// ── AUDIT LOG ──────────────────────────────────────────────────────────────
+// ── AUDIT LOG ─────────────────────────────────────────────────────────────
 async function loadAudit() {
   const search = document.getElementById('auditSearch').value;
   const risk = document.getElementById('auditRisk').value;
@@ -868,72 +941,73 @@ async function loadAudit() {
   if (risk) params.set('risk', risk);
 
   try {
-    const res = await fetch('/dashboard?'+params.toString());
+    const res = await fetch('/dashboard?' + params.toString());
     const data = await res.json();
-    const s = data.stats||{};
-    document.getElementById('as-total').textContent = s.Total||0;
-    document.getElementById('as-allowed').textContent = s.Allowed||0;
-    document.getElementById('as-blocked').textContent = s.Blocked||0;
-    document.getElementById('as-errors').textContent = s.Errors||0;
-    document.getElementById('as-high').textContent = s.HighRisk||0;
-    document.getElementById('as-unacceptable').textContent = s.Unacceptable||0;
+    const s = data.stats || {};
 
-    // Chart
+    document.getElementById('as-total').textContent = s.Total || 0;
+    document.getElementById('as-allowed').textContent = s.Allowed || 0;
+    document.getElementById('as-blocked').textContent = s.Blocked || 0;
+    document.getElementById('as-errors').textContent = s.Errors || 0;
+    document.getElementById('as-high').textContent = s.HighRisk || 0;
+    document.getElementById('as-unacceptable').textContent = s.Unacceptable || 0;
+
     const chart = document.getElementById('auditChart');
     if (data.buckets && data.buckets.length) {
-      const max = Math.max(...data.buckets.map(b=>b.Count));
-      chart.innerHTML = data.buckets.map(b=>{
-        const h = Math.max(2, Math.round((b.Count/max)*56));
-        return '<div class="bar-col"><div class="bar-fill" style="height:'+h+'px" title="'+b.Count+'"></div><div class="bar-lbl">'+esc(b.Hour)+'</div></div>';
+      const max = Math.max(...data.buckets.map(b => b.Count));
+      chart.innerHTML = data.buckets.map(b => {
+        const h = Math.max(2, Math.round((b.Count / max) * 56));
+        return '<div class="bar-col"><div class="bar-fill" style="height:' + h + 'px" title="' + b.Count + ' requests"></div><div class="bar-lbl">' + esc(b.Hour) + '</div></div>';
       }).join('');
     } else {
       chart.innerHTML = '<div style="color:#444;font-size:11px;text-align:center;padding:10px;width:100%">No data yet</div>';
     }
 
-    // Table
     const body = document.getElementById('auditBody');
     if (!data.logs || !data.logs.length) {
       body.innerHTML = '<tr><td colspan="9" class="empty-state">No requests yet</td></tr>';
       return;
     }
-    body.innerHTML = data.logs.map(l=>'<tr>' +
-      '<td>'+l.ID+'</td>' +
-      '<td>'+esc(l.Timestamp)+'</td>' +
-      '<td title="'+esc(l.Prompt)+'">'+esc(trunc(l.Prompt,40))+'</td>' +
-      '<td><span class="b '+l.Status+'">'+l.Status+'</span></td>' +
-      '<td><span class="rb '+l.RiskLevel+'">'+l.RiskLevel+'</span></td>' +
-      '<td>'+esc(l.Category||'—')+'</td>' +
-      '<td>'+l.ClassifierScore.toFixed(2)+'</td>' +
-      '<td>'+esc(l.EUArticle||'—')+'</td>' +
-      '<td><a class="detail-a" href="/admin/audit/'+l.ID+'" target="_blank">View →</a></td>' +
-    '</tr>').join('');
-  } catch(e){ console.error('Audit load error',e); }
+    body.innerHTML = data.logs.map(l =>
+      '<tr>' +
+      '<td>' + l.ID + '</td>' +
+      '<td>' + esc(l.Timestamp) + '</td>' +
+      '<td title="' + esc(l.Prompt) + '">' + esc(trunc(l.Prompt, 45)) + '</td>' +
+      '<td><span class="b ' + l.Status + '">' + l.Status + '</span></td>' +
+      '<td><span class="rb ' + l.RiskLevel + '">' + l.RiskLevel + '</span></td>' +
+      '<td>' + esc(l.Category || '—') + '</td>' +
+      '<td>' + l.ClassifierScore.toFixed(2) + '</td>' +
+      '<td>' + esc(l.EUArticle || '—') + '</td>' +
+      '<td><a class="detail-a" href="/admin/audit/' + l.ID + '" target="_blank">View →</a></td>' +
+      '</tr>'
+    ).join('');
+  } catch (e) { console.error('Audit error', e); }
 }
 
 function clearAudit() {
-  document.getElementById('auditSearch').value='';
-  document.getElementById('auditRisk').value='';
+  document.getElementById('auditSearch').value = '';
+  document.getElementById('auditRisk').value = '';
   loadAudit();
 }
 
-// ── REVIEW QUEUE ───────────────────────────────────────────────────────────
+// ── REVIEW QUEUE ──────────────────────────────────────────────────────────
 async function loadReview() {
   try {
     const [p, a, s] = await Promise.all([
-      fetch('/admin/review').then(r=>r.json()),
-      fetch('/admin/review/all').then(r=>r.json()),
-      fetch('/admin/review/stats').then(r=>r.json())
+      fetch('/admin/review').then(r => r.json()),
+      fetch('/admin/review/all').then(r => r.json()),
+      fetch('/admin/review/stats').then(r => r.json())
     ]);
 
-    const stats = s.stats||{};
-    document.getElementById('rv-pending').textContent = stats.pending||0;
-    document.getElementById('rv-approved').textContent = stats.approved||0;
-    document.getElementById('rv-rejected').textContent = stats.rejected||0;
-    document.getElementById('rv-expired').textContent = stats.expired||0;
+    const stats = s.stats || {};
+    document.getElementById('rv-pending').textContent = stats.pending || 0;
+    document.getElementById('rv-approved').textContent = stats.approved || 0;
+    document.getElementById('rv-rejected').textContent = stats.rejected || 0;
+    document.getElementById('rv-expired').textContent = stats.expired || 0;
 
-    renderPending(p.items||[]);
-    renderReviewHistory((a.items||[]).filter(i=>i.status!=='pending'));
-  } catch(e){ console.error('Review load error',e); }
+    renderPending(p.items || []);
+    renderReviewHistory((a.items || []).filter(i => i.status !== 'pending'));
+  } catch (e) { console.error('Review error', e); }
 }
 
 function renderPending(items) {
@@ -944,23 +1018,23 @@ function renderPending(items) {
   }
   el.innerHTML = items.map(item => {
     const until = timeUntil(item.expires_at);
-    const urgent = until!=='expired' && parseInt(until)<60;
+    const urgent = until !== 'expired' && parseInt(until) < 60;
     const dis = deciding[item.id] ? 'disabled' : '';
-    return '<div class="review-item'+(urgent?' urgent':'')+'" id="ri-'+item.id+'">' +
+    return '<div class="review-item' + (urgent ? ' urgent' : '') + '">' +
       '<div class="ri-header">' +
         '<div class="ri-meta">' +
-          '<span class="ri-id">#'+item.id+'</span>' +
-          '<span class="cat-badge cat-'+esc(item.category)+'">'+esc(item.category||'unknown')+'</span>' +
-          '<span class="score-b '+scoreClass(item.score)+'">'+item.score.toFixed(2)+'</span>' +
-          '<span class="expires-b">expires '+until+'</span>' +
+          '<span class="ri-id">#' + item.id + '</span>' +
+          '<span class="cat-badge cat-' + esc(item.category) + '">' + esc(item.category || 'unknown') + '</span>' +
+          '<span class="score-b ' + scoreClass(item.score) + '">' + item.score.toFixed(2) + '</span>' +
+          '<span class="expires-b">expires ' + until + '</span>' +
         '</div>' +
-        '<span class="ri-time">'+esc(item.created_at)+'</span>' +
+        '<span class="ri-time">' + esc(item.created_at) + '</span>' +
       '</div>' +
-      '<div class="prompt-box">'+esc(item.prompt)+'</div>' +
-      (item.reasoning?'<button class="reasoning-btn2" onclick="toggleR2(this)">View AI reasoning ↓</button><div class="reasoning-box2">'+esc(item.reasoning)+'</div>':'') +
+      '<div class="prompt-box">' + esc(item.prompt) + '</div>' +
+      (item.reasoning ? '<button class="reasoning-btn2" onclick="toggleR2(this)">View AI reasoning ↓</button><div class="reasoning-box2">' + esc(item.reasoning) + '</div>' : '') +
       '<div class="action-row">' +
-        '<button class="btn-approve" onclick="reviewDecide('+item.id+',\'approve\')" '+dis+'>✓ Approve</button>' +
-        '<button class="btn-reject" onclick="reviewDecide('+item.id+',\'reject\')" '+dis+'>✗ Reject</button>' +
+        '<button class="btn-approve" onclick="reviewDecide(' + item.id + ',\'approve\')" ' + dis + '>✓ Approve — forward to AI</button>' +
+        '<button class="btn-reject" onclick="reviewDecide(' + item.id + ',\'reject\')" ' + dis + '>✗ Reject — block this request</button>' +
       '</div>' +
     '</div>';
   }).join('');
@@ -968,14 +1042,16 @@ function renderPending(items) {
 
 function renderReviewHistory(items) {
   const el = document.getElementById('reviewHistory');
-  if (!items.length) { el.innerHTML='<div class="empty-state" style="padding:20px">No decisions yet</div>'; return; }
-  el.innerHTML = items.slice(0,15).map(item=>'<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#0d0d18;border-radius:6px;margin-bottom:4px;gap:10px">' +
-    '<span style="font-size:12px;color:#888;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(item.prompt)+'">'+esc(trunc(item.prompt,60))+'</span>' +
+  if (!items.length) { el.innerHTML = '<div class="empty-state" style="padding:20px">No decisions yet</div>'; return; }
+  el.innerHTML = items.slice(0, 15).map(item =>
+    '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#0d0d18;border-radius:6px;margin-bottom:4px;gap:10px">' +
+    '<span style="font-size:12px;color:#777;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(item.prompt) + '">' + esc(trunc(item.prompt, 60)) + '</span>' +
     '<div style="display:flex;gap:6px;flex-shrink:0">' +
-      '<span class="cat-badge cat-'+esc(item.category)+'">'+esc(item.category||'')+'</span>' +
-      '<span class="decided-b decided-'+item.status+'">'+item.status+'</span>' +
+      '<span class="cat-badge cat-' + esc(item.category) + '">' + esc(item.category || '') + '</span>' +
+      '<span class="decided-b decided-' + item.status + '">' + item.status + '</span>' +
     '</div>' +
-  '</div>').join('');
+    '</div>'
+  ).join('');
 }
 
 function toggleR2(btn) {
@@ -986,152 +1062,299 @@ function toggleR2(btn) {
 
 async function reviewDecide(id, action) {
   deciding[id] = true;
-  renderPending((await fetch('/admin/review').then(r=>r.json())).items||[]);
+  loadReview();
   try {
-    await fetch('/admin/review/'+action, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({id, reviewer:'admin'})
+    const res = await fetch('/admin/review/' + action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, reviewer: 'admin' })
     });
-  } catch(e){ alert('Error: '+e.message); }
-  deciding[id]=false;
+    const data = await res.json();
+    if (!res.ok) alert('Error: ' + data.reason);
+  } catch (e) { alert('Error: ' + e.message); }
+  deciding[id] = false;
   loadReview();
 }
 
-// ── INCIDENTS ──────────────────────────────────────────────────────────────
+// ── INCIDENTS ─────────────────────────────────────────────────────────────
 function setIncFilter(f, btn) {
   incFilter = f;
-  document.querySelectorAll('#incFilter .filter-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('#incFilter .filter-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   loadIncidents();
 }
 
 async function loadIncidents() {
   try {
-    const url = '/admin/incidents'+(incFilter?'?severity='+incFilter:'');
+    const url = '/admin/incidents' + (incFilter ? '?severity=' + incFilter : '');
     const [incData, statsData] = await Promise.all([
-      fetch(url).then(r=>r.json()),
-      fetch('/admin/incidents/stats').then(r=>r.json())
+      fetch(url).then(r => r.json()),
+      fetch('/admin/incidents/stats').then(r => r.json())
     ]);
 
-    const s = statsData.stats||{};
-    document.getElementById('inc-total').textContent = s.total||0;
-    document.getElementById('inc-unresolved').textContent = s.unresolved||0;
-    document.getElementById('inc-critical').textContent = s.critical||0;
-    document.getElementById('inc-high').textContent = s.high||0;
-    document.getElementById('inc-medium').textContent = s.medium||0;
-    document.getElementById('inc-low').textContent = s.low||0;
+    const s = statsData.stats || {};
+    document.getElementById('inc-total').textContent = s.total || 0;
+    document.getElementById('inc-unresolved').textContent = s.unresolved || 0;
+    document.getElementById('inc-critical').textContent = s.critical || 0;
+    document.getElementById('inc-high').textContent = s.high || 0;
+    document.getElementById('inc-medium').textContent = s.medium || 0;
+    document.getElementById('inc-low').textContent = s.low || 0;
 
-    renderIncidents(incData.incidents||[]);
-  } catch(e){ console.error('Incidents load error',e); }
+    renderIncidents(incData.incidents || []);
+  } catch (e) { console.error('Incidents error', e); }
 }
 
 function renderIncidents(items) {
   const el = document.getElementById('incidentsList');
-  if (!items.length) { el.innerHTML='<div class="empty-state">No incidents'+(incFilter?' for severity "'+incFilter+'"':'')+'</div>'; return; }
-  el.innerHTML = items.map(inc=>{
-    const cls = 'incident-card '+inc.severity+(inc.resolved?' resolved':'');
-    const prompt = trunc(inc.prompt, 180);
-    const dis = resolving[inc.id]?'disabled':'';
-    return '<div class="'+cls+'">' +
-      '<div class="inc-header">' +
+  if (!items.length) {
+    el.innerHTML = '<div class="empty-state">No incidents' + (incFilter ? ' for severity "' + incFilter + '"' : '') + '</div>';
+    return;
+  }
+  el.innerHTML = items.map(inc => {
+    const dis = resolving[inc.id] ? 'disabled' : '';
+    const prompt = trunc(inc.prompt, 200);
+    return '<div class="incident-card ' + inc.severity + (inc.resolved ? ' resolved' : '') + '">' +
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;gap:10px">' +
         '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
-          '<span style="font-size:10px;color:#444">#'+inc.id+'</span>' +
-          '<span class="sev-b sev-'+inc.severity+'">'+inc.severity.toUpperCase()+'</span>' +
-          '<span class="cat-badge cat-'+esc(inc.category)+'">'+esc(inc.category)+'</span>' +
-          (inc.eu_article?'<span style="background:#1a2a4e;color:#93c5fd;font-size:10px;padding:2px 7px;border-radius:12px">'+esc(inc.eu_article)+'</span>':'') +
-          (inc.email_sent?'<span class="email-b">📧 alerted</span>':'') +
-          (inc.resolved?'<span class="resolved-b">✓ resolved by '+esc(inc.resolved_by)+'</span>':'') +
+          '<span style="font-size:10px;color:#444">#' + inc.id + '</span>' +
+          '<span class="sev-b sev-' + inc.severity + '">' + inc.severity.toUpperCase() + '</span>' +
+          '<span class="cat-badge cat-' + esc(inc.category) + '">' + esc(inc.category) + '</span>' +
+          (inc.eu_article ? '<span style="background:#1a2a4e;color:#93c5fd;font-size:10px;padding:2px 7px;border-radius:12px">' + esc(inc.eu_article) + '</span>' : '') +
+          (inc.email_sent ? '<span class="email-b">📧 alerted</span>' : '') +
+          (inc.resolved ? '<span class="resolved-b">✓ resolved by ' + esc(inc.resolved_by) + '</span>' : '') +
         '</div>' +
-        '<span style="font-size:10px;color:#444;flex-shrink:0">'+esc(inc.timestamp)+'</span>' +
+        '<span style="font-size:10px;color:#444;flex-shrink:0">' + esc(inc.timestamp) + '</span>' +
       '</div>' +
-      '<div class="inc-prompt">'+esc(prompt)+'</div>' +
-      '<div class="inc-reason">'+esc(inc.reason)+'</div>' +
+      '<div class="inc-prompt">' + esc(prompt) + '</div>' +
+      '<div class="inc-reason">' + esc(inc.reason) + '</div>' +
       '<div class="inc-footer">' +
-        '<span class="inc-ip">'+esc(inc.client_ip)+'</span>' +
-        (!inc.resolved?'<button class="resolve-btn" onclick="resolveInc('+inc.id+',this)" '+dis+'>Mark resolved</button>':'') +
+        '<span class="inc-ip">' + esc(inc.client_ip) + '</span>' +
+        (!inc.resolved ? '<button class="resolve-btn" onclick="resolveInc(' + inc.id + ',this)" ' + dis + '>Mark resolved</button>' : '') +
       '</div>' +
     '</div>';
   }).join('');
 }
 
 async function resolveInc(id, btn) {
-  resolving[id]=true; btn.disabled=true; btn.textContent='Resolving...';
+  resolving[id] = true; btn.disabled = true; btn.textContent = 'Resolving...';
   try {
     await fetch('/admin/incidents/resolve', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({id, resolved_by:'admin'})
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, resolved_by: 'admin' })
     });
-  } catch(e){ alert('Error: '+e.message); }
-  resolving[id]=false;
+  } catch (e) { alert('Error: ' + e.message); }
+  resolving[id] = false;
   loadIncidents();
 }
 
-// ── RETENTION ──────────────────────────────────────────────────────────────
+// ── API KEYS ──────────────────────────────────────────────────────────────
+async function loadKeys() {
+  const status = document.getElementById('keyStatusFilter').value;
+  try {
+    const [keysRes, statsRes] = await Promise.all([
+      fetch('/admin/keys' + (status ? '?status=' + status : '')),
+      fetch('/admin/keys/stats')
+    ]);
+    const keysData = await keysRes.json();
+    const statsData = await statsRes.json();
+
+    const s = statsData.stats || {};
+    document.getElementById('ks-total').textContent = s.total || 0;
+    document.getElementById('ks-active').textContent = s.active || 0;
+    document.getElementById('ks-suspended').textContent = s.suspended || 0;
+    document.getElementById('ks-revoked').textContent = s.revoked || 0;
+    document.getElementById('ks-expired').textContent = s.expired || 0;
+
+    const suspended = s.suspended || 0;
+    const kc = document.getElementById('keys-count');
+    kc.textContent = suspended; kc.style.display = suspended ? '' : 'none';
+
+    const body = document.getElementById('keysBody');
+    const keys = keysData.keys || [];
+    if (!keys.length) {
+      body.innerHTML = '<tr><td colspan="11" class="empty-state">No keys yet — generate one above</td></tr>';
+      return;
+    }
+
+    body.innerHTML = keys.map(k => {
+      const statusBadge = {
+        active: '<span class="ks-active">active</span>',
+        revoked: '<span class="ks-revoked">revoked</span>',
+        suspended: '<span class="ks-suspended">suspended</span>',
+        expired: '<span class="ks-expired">expired</span>'
+      }[k.status] || esc(k.status);
+
+      const actions = k.status === 'active'
+        ? '<button class="key-action-btn ka-suspend" onclick="suspendKey(' + k.id + ')">Suspend</button> ' +
+          '<button class="key-action-btn ka-revoke" onclick="revokeKey(' + k.id + ',\'' + esc(k.name) + '\')">Revoke</button>'
+        : k.status === 'suspended'
+          ? '<button class="key-action-btn ka-activate" onclick="activateKey(' + k.id + ')">Activate</button>'
+          : '—';
+
+      return '<tr>' +
+        '<td>' + k.id + '</td>' +
+        '<td style="font-family:monospace;font-size:11px;color:#a5b4fc">' + esc(k.key) + '</td>' +
+        '<td style="font-weight:500;color:#ddd">' + esc(k.name) + '</td>' +
+        '<td>' + esc(k.owner || '—') + '</td>' +
+        '<td>' + statusBadge + '</td>' +
+        '<td>' + (k.rate_limit ? k.rate_limit + '/min' : 'default') + '</td>' +
+        '<td>' + (k.request_count || 0) + '</td>' +
+        '<td>' + (k.block_count || 0) + '</td>' +
+        '<td style="font-size:10px">' + (k.last_used_at || '—') + '</td>' +
+        '<td style="font-size:10px">' + (k.expires_at || 'never') + '</td>' +
+        '<td>' + actions + '</td>' +
+      '</tr>';
+    }).join('');
+  } catch (e) { console.error('Keys error', e); }
+}
+
+async function generateKey() {
+  const name = document.getElementById('kName').value.trim();
+  const owner = document.getElementById('kOwner').value.trim();
+  const rateLimit = parseInt(document.getElementById('kRateLimit').value) || 0;
+  const expiresDays = parseInt(document.getElementById('kExpires').value) || 0;
+  const el = document.getElementById('keyResult');
+
+  if (!name) { el.className = 'result-box show error'; el.textContent = '✗ Name is required'; return; }
+
+  try {
+    const res = await fetch('/admin/keys/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, owner, rate_limit: rateLimit, expires_days: expiresDays })
+    });
+    const data = await res.json();
+    el.className = 'result-box show' + (res.ok ? '' : ' error');
+    if (res.ok) {
+      el.innerHTML =
+        '✓ Key created for <strong style="color:#ddd">' + esc(name) + '</strong>' +
+        '<div style="margin:8px 0 4px;padding:10px 12px;background:#0a0a12;border:1px solid #4f46e5;border-radius:6px;font-family:monospace;font-size:13px;color:#a5b4fc;word-break:break-all">' +
+        esc(data.key.key) + '</div>' +
+        '<div style="font-size:11px;color:#f87171">⚠ Copy and save this key now — it will never be shown in full again</div>';
+      document.getElementById('kName').value = '';
+      document.getElementById('kOwner').value = '';
+      loadKeys();
+    } else {
+      el.textContent = '✗ ' + data.reason;
+    }
+  } catch (e) { el.className = 'result-box show error'; el.textContent = '✗ ' + e.message; }
+}
+
+async function revokeKey(id, name) {
+  const reason = prompt('Reason for revoking "' + name + '"?\n\nThis is permanent. Use Suspend if you want to temporarily disable it.');
+  if (reason === null) return;
+  try {
+    const res = await fetch('/admin/keys/revoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key_or_id: String(id), revoked_by: 'admin', reason: reason || 'admin revocation' })
+    });
+    const data = await res.json();
+    if (!res.ok) alert('Error: ' + data.reason);
+    loadKeys();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function suspendKey(id) {
+  try {
+    await fetch('/admin/keys/suspend', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, by: 'admin' })
+    });
+    loadKeys();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function activateKey(id) {
+  try {
+    await fetch('/admin/keys/activate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, by: 'admin' })
+    });
+    loadKeys();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+// ── RETENTION ─────────────────────────────────────────────────────────────
 async function loadRetention() {
   try {
     const res = await fetch('/admin/retention');
     const data = await res.json();
-    const p = data.policy||{};
-    const s = data.storage||{};
-    document.getElementById('retDays').value = p.retention_days||90;
+    const p = data.policy || {};
+    const s = data.storage || {};
+    document.getElementById('retDays').value = p.retention_days || 90;
     document.getElementById('retentionStatus').innerHTML =
       '<p class="rc-title">Current policy</p>' +
       '<div class="ret-stats">' +
-        '<div class="stat-card s-total"><div class="stat-val">'+( s.audit_logs||0)+'</div><div class="stat-lbl">Audit logs</div></div>' +
-        '<div class="stat-card s-total"><div class="stat-val">'+(s.incidents||0)+'</div><div class="stat-lbl">Incidents</div></div>' +
-        '<div class="stat-card s-total"><div class="stat-val">'+(s.review_queue||0)+'</div><div class="stat-lbl">Review items</div></div>' +
+        '<div class="stat-card s-total"><div class="stat-val">' + (s.audit_logs || 0) + '</div><div class="stat-lbl">Audit logs</div></div>' +
+        '<div class="stat-card s-total"><div class="stat-val">' + (s.incidents || 0) + '</div><div class="stat-lbl">Incidents</div></div>' +
+        '<div class="stat-card s-total"><div class="stat-val">' + (s.review_queue || 0) + '</div><div class="stat-lbl">Review items</div></div>' +
       '</div>' +
-      '<div class="info-row"><span class="info-lbl">Retention period</span><span class="info-val">'+(p.retention_days||'—')+' days</span></div>' +
-      '<div class="info-row"><span class="info-lbl">Oldest log</span><span class="info-val">'+(s.oldest_log||'—')+'</span></div>' +
-      '<div class="info-row"><span class="info-lbl">Newest log</span><span class="info-val">'+(s.newest_log||'—')+'</span></div>' +
-      '<div class="info-row"><span class="info-lbl">Last updated by</span><span class="info-val">'+(p.updated_by||'—')+' on '+(p.updated_at||'—')+'</span></div>';
-  } catch(e){ console.error('Retention load error',e); }
+      '<div class="info-row"><span class="info-lbl">Retention period</span><span class="info-val">' + (p.retention_days || '—') + ' days</span></div>' +
+      '<div class="info-row"><span class="info-lbl">Oldest log</span><span class="info-val">' + (s.oldest_log || '—') + '</span></div>' +
+      '<div class="info-row"><span class="info-lbl">Newest log</span><span class="info-val">' + (s.newest_log || '—') + '</span></div>' +
+      '<div class="info-row"><span class="info-lbl">Last updated</span><span class="info-val">' + (p.updated_at || '—') + ' by ' + (p.updated_by || '—') + '</span></div>';
+  } catch (e) { console.error('Retention error', e); }
 }
 
 async function updateRetention() {
   const days = parseInt(document.getElementById('retDays').value);
-  const by = document.getElementById('retUpdatedBy').value||'admin';
+  const by = document.getElementById('retUpdatedBy').value || 'admin';
   const el = document.getElementById('retResult');
   try {
-    const res = await fetch('/admin/retention',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({days,updated_by:by})});
+    const res = await fetch('/admin/retention', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ days, updated_by: by })
+    });
     const data = await res.json();
-    el.className='result-box show'+(res.ok?'':' error');
-    el.textContent = res.ok ? '✓ '+data.message : '✗ '+data.reason;
+    el.className = 'result-box show' + (res.ok ? '' : ' error');
+    el.textContent = res.ok ? '✓ ' + data.message : '✗ ' + data.reason;
     if (res.ok) loadRetention();
-  } catch(e){ el.className='result-box show error'; el.textContent='✗ '+e.message; }
+  } catch (e) { el.className = 'result-box show error'; el.textContent = '✗ ' + e.message; }
 }
 
 async function triggerPurge() {
   const el = document.getElementById('purgeResult');
-  el.className='result-box show'; el.textContent='Running purge...';
+  el.className = 'result-box show'; el.textContent = 'Running purge...';
   try {
-    const res = await fetch('/admin/retention/purge',{method:'POST'});
+    const res = await fetch('/admin/retention/purge', { method: 'POST' });
     const data = await res.json();
-    el.className='result-box show'+(res.ok?'':' error');
+    el.className = 'result-box show' + (res.ok ? '' : ' error');
     if (res.ok) {
-      const r=data.result;
-      el.textContent='✓ Purge complete — '+r.audit_logs_deleted+' audit logs, '+r.incidents_deleted+' incidents, '+r.review_items_deleted+' review items deleted';
+      const r = data.result;
+      el.textContent = '✓ Purge complete — ' + r.audit_logs_deleted + ' audit logs, ' +
+        r.incidents_deleted + ' incidents, ' + r.review_items_deleted + ' review items deleted';
       loadRetention();
-    } else { el.textContent='✗ '+data.reason; }
-  } catch(e){ el.className='result-box show error'; el.textContent='✗ '+e.message; }
+    } else {
+      el.textContent = '✗ ' + data.reason;
+    }
+  } catch (e) { el.className = 'result-box show error'; el.textContent = '✗ ' + e.message; }
 }
 
 async function eraseData() {
-  const key = document.getElementById('eraseKey').value.trim();
+  const apiKey = document.getElementById('eraseKey').value.trim();
   const el = document.getElementById('eraseResult');
   const btn = document.getElementById('eraseBtn');
-  if (!key) { el.className='result-box show error'; el.textContent='✗ Enter an API key'; return; }
-  if (!confirm('Permanently delete all audit logs for "'+key+'"? This cannot be undone.')) return;
-  btn.disabled=true; btn.textContent='Erasing...';
-  el.className='result-box show'; el.textContent='Processing...';
+  if (!apiKey) { el.className = 'result-box show error'; el.textContent = '✗ Enter an API key'; return; }
+  if (!confirm('Permanently delete all audit logs for "' + apiKey + '"? This cannot be undone.')) return;
+  btn.disabled = true; btn.textContent = 'Erasing...';
+  el.className = 'result-box show'; el.textContent = 'Processing...';
   try {
-    const res = await fetch('/admin/retention/erase',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({api_key:key})});
+    const res = await fetch('/admin/retention/erase', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey })
+    });
     const data = await res.json();
-    el.className='result-box show'+(res.ok?'':' error');
-    el.textContent = res.ok ? '✓ '+data.message : '✗ '+data.reason;
+    el.className = 'result-box show' + (res.ok ? '' : ' error');
+    el.textContent = res.ok ? '✓ ' + data.message : '✗ ' + data.reason;
     if (res.ok) loadRetention();
-  } catch(e){ el.className='result-box show error'; el.textContent='✗ '+e.message; }
-  btn.disabled=false; btn.textContent='Erase all data';
+  } catch (e) { el.className = 'result-box show error'; el.textContent = '✗ ' + e.message; }
+  btn.disabled = false; btn.textContent = 'Erase all data';
 }
 </script>
 </body>

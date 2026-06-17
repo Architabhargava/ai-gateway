@@ -7,7 +7,7 @@ on:
     branches: [main, master]
 
 env:
-  GO_VERSION: "1.26"
+  GO_VERSION: "1.24"
   APP_NAME: ai-gateway
 
 jobs:
@@ -32,7 +32,7 @@ jobs:
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
-          args: --timeout=5m
+          args: --timeout=5m --config=.golangci.yml
 
   # ── Job 2: Test ─────────────────────────────────────────────────────────
   test:
@@ -58,7 +58,7 @@ jobs:
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           file: ./coverage.out
           fail_ci_if_error: false

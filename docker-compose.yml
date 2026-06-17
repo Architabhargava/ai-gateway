@@ -1,0 +1,35 @@
+# Local development with hot reload via air
+# Usage: docker-compose up
+# Install air: go install github.com/air-verse/air@latest
+
+version: "3.9"
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GATEWAY_API_KEYS=${GATEWAY_API_KEYS}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - ALERT_EMAIL_TO=${ALERT_EMAIL_TO}
+      - ALERT_EMAIL_FROM=${ALERT_EMAIL_FROM}
+      - ADMIN_USERNAME=${ADMIN_USERNAME}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - PORT=8080
+    volumes:
+      - gateway_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  gateway_data:
+    driver: local

@@ -1,0 +1,30 @@
+# Render deployment configuration — Infrastructure as Code
+# Docs: https://render.com/docs/blueprint-spec
+# Deploy: connect this repo on render.com, it reads this file automatically
+
+services:
+  - type: web
+    name: ai-gateway
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false          # set manually in Render dashboard — never in code
+      - key: GATEWAY_API_KEYS
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: ALERT_EMAIL_TO
+        sync: false
+      - key: ALERT_EMAIL_FROM
+        value: onboarding@resend.dev
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: PORT
+        value: "8080"
+      - key: RENDER
+        value: "true"

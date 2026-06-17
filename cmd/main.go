@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"ai-gateway/internal/auth"
 	"ai-gateway/internal/dashboard"
@@ -12,9 +16,12 @@ import (
 	"ai-gateway/internal/logger"
 )
 
+// version is injected at build time via -ldflags
+var version = "dev"
+
 func main() {
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	fmt.Println("  AI Gateway — EU AI Act Compliant")
+	fmt.Printf("  AI Gateway %s — EU AI Act Compliant\n", version)
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 	dbPath := "gateway.db"
@@ -23,21 +30,20 @@ func main() {
 		fmt.Println("[Main] Running on Render — using /tmp/gateway.db")
 	}
 
-	// ── Initialise shared dependencies ────────────────────────────────────────
+	// ── Initialise dependencies ───────────────────────────────────────────────
 	l, err := logger.New(dbPath)
 	if err != nil {
 		log.Fatal("[Main] Logger failed:", err)
 	}
-	defer l.Close()
 
 	gw := gateway.New(l)
 	dash := dashboard.New(l)
-	admin := auth.NewAdminAuth()
+	adminAuth := auth.NewAdminAuth()
 
+	// ── Register routes ───────────────────────────────────────────────────────
 	mux := http.NewServeMux()
 
-	// ── PUBLIC routes — anyone can access ─────────────────────────────────────
-	// Root → user chat interface (no login required, uses API key auth)
+	// Public routes — users
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
 			dash.HandleChat(w, r)
@@ -46,68 +52,77 @@ func main() {
 		http.NotFound(w, r)
 	})
 	mux.HandleFunc("/chat", dash.HandleChat)
-
-	// Gateway API endpoint — authenticated by X-API-Key header
 	mux.HandleFunc("/ai", gw.HandleAI)
+	mux.HandleFunc("/health", handleHealth)
 
-	// Liveness probe — for deployment platforms
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "ok")
-	})
+	// Admin routes — protected by HTTP Basic Auth
+	mux.HandleFunc("/platform", adminAuth.Middleware(dash.HandlePlatform))
+	mux.HandleFunc("/dashboard", adminAuth.Middleware(dash.HandleDashboard))
+	mux.HandleFunc("/admin/audit/", adminAuth.Middleware(gw.HandleAuditDetail))
+	mux.HandleFunc("/admin/rules", adminAuth.Middleware(gw.HandleRules))
+	mux.HandleFunc("/admin/review", adminAuth.Middleware(gw.HandleReview))
+	mux.HandleFunc("/admin/review/", adminAuth.Middleware(gw.HandleReview))
+	mux.HandleFunc("/admin/incidents", adminAuth.Middleware(gw.HandleIncidents))
+	mux.HandleFunc("/admin/incidents/", adminAuth.Middleware(gw.HandleIncidents))
+	mux.HandleFunc("/admin/retention", adminAuth.Middleware(gw.HandleRetention))
+	mux.HandleFunc("/admin/retention/", adminAuth.Middleware(gw.HandleRetention))
+	mux.HandleFunc("/admin/keys", adminAuth.Middleware(gw.HandleKeys))
+	mux.HandleFunc("/admin/keys/", adminAuth.Middleware(gw.HandleKeys))
 
-	// ── ADMIN routes — protected by HTTP Basic Auth ───────────────────────────
-	// All /platform and /admin/* routes require admin credentials
-	// Users are completely locked out of these endpoints
-
-	// Admin platform UI
-	mux.HandleFunc("/platform", admin.Middleware(dash.HandlePlatform))
-
-	// Dashboard data API (JSON) — used by the platform UI
-	mux.HandleFunc("/dashboard", admin.Middleware(dash.HandleDashboard))
-
-	// Admin API — audit detail
-	mux.HandleFunc("/admin/audit/", admin.Middleware(gw.HandleAuditDetail))
-
-	// Admin API — keyword rules
-	mux.HandleFunc("/admin/rules", admin.Middleware(gw.HandleRules))
-
-	// Admin API — human review queue
-	mux.HandleFunc("/admin/review", admin.Middleware(gw.HandleReview))
-	mux.HandleFunc("/admin/review/", admin.Middleware(gw.HandleReview))
-
-	// Admin API — incidents
-	mux.HandleFunc("/admin/incidents", admin.Middleware(gw.HandleIncidents))
-	mux.HandleFunc("/admin/incidents/", admin.Middleware(gw.HandleIncidents))
-
-	// Admin API — retention + GDPR erasure
-	mux.HandleFunc("/admin/retention", admin.Middleware(gw.HandleRetention))
-	mux.HandleFunc("/admin/retention/", admin.Middleware(gw.HandleRetention))
-
-	// Admin API — API key management
-	mux.HandleFunc("/admin/keys", admin.Middleware(gw.HandleKeys))
-	mux.HandleFunc("/admin/keys/", admin.Middleware(gw.HandleKeys))
-
+	// ── Start server with graceful shutdown ───────────────────────────────────
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
-	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	fmt.Printf("  Listening on http://localhost:%s\n", port)
-	fmt.Println("")
-	fmt.Println("  PUBLIC (users):")
-	fmt.Println("    http://localhost:" + port + "/          Chat UI")
-	fmt.Println("    http://localhost:" + port + "/ai        Gateway endpoint")
-	fmt.Println("")
-	fmt.Println("  ADMIN (password protected):")
-	fmt.Println("    http://localhost:" + port + "/platform  Full admin platform")
-	fmt.Println("")
-	fmt.Println("  Admin credentials from .env:")
-	fmt.Println("    ADMIN_USERNAME / ADMIN_PASSWORD")
-	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
-		log.Fatal(err)
+	srv := &http.Server{
+		Addr:         ":" + port,
+		Handler:      mux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 120 * time.Second, // long timeout for review queue polling
+		IdleTimeout:  60 * time.Second,
 	}
+
+	// Start server in background goroutine
+	go func() {
+		fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		fmt.Printf("  Listening on http://localhost:%s\n", port)
+		fmt.Println("")
+		fmt.Println("  PUBLIC (users):")
+		fmt.Println("    http://localhost:" + port + "/          Chat UI")
+		fmt.Println("    http://localhost:" + port + "/ai        Gateway endpoint")
+		fmt.Println("")
+		fmt.Println("  ADMIN (password protected):")
+		fmt.Println("    http://localhost:" + port + "/platform  Admin platform")
+		fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("[Main] Server error: %v", err)
+		}
+	}()
+
+	// ── Graceful shutdown ─────────────────────────────────────────────────────
+	// Wait for OS signal (SIGTERM from Render/Kubernetes, SIGINT from Ctrl+C)
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	sig := <-quit
+
+	fmt.Printf("\n[Main] Received signal: %s — shutting down gracefully...\n", sig)
+
+	// Give in-flight requests up to 30 seconds to complete
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		fmt.Printf("[Main] Forced shutdown after timeout: %v\n", err)
+	}
+
+	// Close database connection cleanly
+	l.Close()
+	fmt.Println("[Main] Server stopped — goodbye")
+}
+
+func handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintln(w, "ok")
 }

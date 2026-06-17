@@ -33,18 +33,28 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// ── User-facing pages ─────────────────────────────────────────────────────
-	mux.HandleFunc("/", dash.HandleHome)
-	mux.HandleFunc("/dashboard", dash.HandleDashboard)
-	mux.HandleFunc("/review", dash.HandleReviewPage)
-	mux.HandleFunc("/incidents", dash.HandleIncidentsPage)
-	mux.HandleFunc("/retention", dash.HandleRetentionPage)
-	mux.HandleFunc("/health", handleHealth)
+	// ── Unified platform (single URL, all features) ───────────────────────────
+	mux.HandleFunc("/platform", dash.HandlePlatform)
 
-	// ── Core gateway ──────────────────────────────────────────────────────────
+	// ── Root redirects to platform ────────────────────────────────────────────
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, "/platform", http.StatusFound)
+			return
+		}
+		http.NotFound(w, r)
+	})
+
+	// ── Gateway endpoint ──────────────────────────────────────────────────────
 	mux.HandleFunc("/ai", gw.HandleAI)
 
-	// ── Admin API — audit ─────────────────────────────────────────────────────
+	// ── Dashboard data API (JSON for platform) ────────────────────────────────
+	mux.HandleFunc("/dashboard", dash.HandleDashboard)
+
+	// ── Liveness probe ────────────────────────────────────────────────────────
+	mux.HandleFunc("/health", handleHealth)
+
+	// ── Admin API — audit detail ──────────────────────────────────────────────
 	mux.HandleFunc("/admin/audit/", gw.HandleAuditDetail)
 
 	// ── Admin API — keyword rules ─────────────────────────────────────────────
@@ -68,29 +78,8 @@ func main() {
 	}
 
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	fmt.Printf("  Listening on http://localhost:%s\n", port)
-	fmt.Println("")
-	fmt.Println("  Pages:")
-	fmt.Println("    /              Chat UI")
-	fmt.Println("    /dashboard     Audit log")
-	fmt.Println("    /review        Human review queue")
-	fmt.Println("    /incidents     Incident dashboard")
-	fmt.Println("    /retention     Retention & GDPR erasure")
-	fmt.Println("    /health        Liveness probe")
-	fmt.Println("")
-	fmt.Println("  Admin API:")
-	fmt.Println("    POST   /ai                          Gateway endpoint")
-	fmt.Println("    GET    /admin/audit/:id             Full reasoning chain")
-	fmt.Println("    *      /admin/rules                 Keyword rules")
-	fmt.Println("    GET    /admin/review                Pending queue")
-	fmt.Println("    POST   /admin/review/approve        Approve item")
-	fmt.Println("    POST   /admin/review/reject         Reject item")
-	fmt.Println("    GET    /admin/incidents             All incidents")
-	fmt.Println("    POST   /admin/incidents/resolve     Resolve incident")
-	fmt.Println("    GET    /admin/retention             Policy + storage stats")
-	fmt.Println("    POST   /admin/retention             Update retention days")
-	fmt.Println("    POST   /admin/retention/purge       Manual purge")
-	fmt.Println("    DELETE /admin/retention/erase       GDPR right to erasure")
+	fmt.Printf("  Open http://localhost:%s/platform\n", port)
+	fmt.Println("  Everything is in one place.")
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 	if err := http.ListenAndServe(":"+port, mux); err != nil {

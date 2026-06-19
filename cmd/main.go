@@ -10,13 +10,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"ai-gateway/internal/auth"
 	"ai-gateway/internal/dashboard"
 	"ai-gateway/internal/gateway"
 	"ai-gateway/internal/logger"
 )
 
-// version is injected at build time via -ldflags
 var version = "dev"
 
 func main() {
@@ -30,7 +31,6 @@ func main() {
 		fmt.Println("[Main] Running on Render — using /tmp/gateway.db")
 	}
 
-	// ── Initialise dependencies ───────────────────────────────────────────────
 	l, err := logger.New(dbPath)
 	if err != nil {
 		log.Fatal("[Main] Logger failed:", err)
@@ -40,10 +40,9 @@ func main() {
 	dash := dashboard.New(l)
 	adminAuth := auth.NewAdminAuth()
 
-	// ── Register routes ───────────────────────────────────────────────────────
 	mux := http.NewServeMux()
 
-	// Public routes — users
+	// ── Public routes ─────────────────────────────────────────────────────
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
 			dash.HandleChat(w, r)
@@ -53,9 +52,19 @@ func main() {
 	})
 	mux.HandleFunc("/chat", dash.HandleChat)
 	mux.HandleFunc("/ai", gw.HandleAI)
-	mux.HandleFunc("/health", handleHealth)
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, "ok")
+	})
 
-	// Admin routes — protected by HTTP Basic Auth
+	// ── Prometheus metrics endpoint ───────────────────────────────────────
+	// Exposes all registered metrics in Prometheus text format.
+	// Scraped by Grafana Cloud every 15 seconds.
+	// No auth on purpose — metrics contain no sensitive data,
+	// only aggregate counts and histograms.
+	mux.Handle("/metrics", promhttp.Handler())
+
+	// ── Admin routes (HTTP Basic Auth) ────────────────────────────────────
 	mux.HandleFunc("/platform", adminAuth.Middleware(dash.HandlePlatform))
 	mux.HandleFunc("/dashboard", adminAuth.Middleware(dash.HandleDashboard))
 	mux.HandleFunc("/admin/audit/", adminAuth.Middleware(gw.HandleAuditDetail))
@@ -69,7 +78,6 @@ func main() {
 	mux.HandleFunc("/admin/keys", adminAuth.Middleware(gw.HandleKeys))
 	mux.HandleFunc("/admin/keys/", adminAuth.Middleware(gw.HandleKeys))
 
-	// ── Start server with graceful shutdown ───────────────────────────────────
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -79,21 +87,22 @@ func main() {
 		Addr:         ":" + port,
 		Handler:      mux,
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 120 * time.Second, // long timeout for review queue polling
+		WriteTimeout: 120 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// Start server in background goroutine
 	go func() {
 		fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 		fmt.Printf("  Listening on http://localhost:%s\n", port)
 		fmt.Println("")
-		fmt.Println("  PUBLIC (users):")
-		fmt.Println("    http://localhost:" + port + "/          Chat UI")
-		fmt.Println("    http://localhost:" + port + "/ai        Gateway endpoint")
+		fmt.Println("  PUBLIC:")
+		fmt.Println("    /          Chat UI")
+		fmt.Println("    /ai        Gateway endpoint")
+		fmt.Println("    /metrics   Prometheus metrics")
+		fmt.Println("    /health    Liveness probe")
 		fmt.Println("")
-		fmt.Println("  ADMIN (password protected):")
-		fmt.Println("    http://localhost:" + port + "/platform  Admin platform")
+		fmt.Println("  ADMIN (Basic Auth):")
+		fmt.Println("    /platform  Admin platform")
 		fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -101,28 +110,19 @@ func main() {
 		}
 	}()
 
-	// ── Graceful shutdown ─────────────────────────────────────────────────────
-	// Wait for OS signal (SIGTERM from Render/Kubernetes, SIGINT from Ctrl+C)
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-quit
 
-	fmt.Printf("\n[Main] Received signal: %s — shutting down gracefully...\n", sig)
+	fmt.Printf("\n[Main] Signal %s — shutting down gracefully...\n", sig)
 
-	// Give in-flight requests up to 30 seconds to complete
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		fmt.Printf("[Main] Forced shutdown after timeout: %v\n", err)
+		fmt.Printf("[Main] Forced shutdown: %v\n", err)
 	}
 
-	// Close database connection cleanly
 	l.Close()
-	fmt.Println("[Main] Server stopped — goodbye")
-}
-
-func handleHealth(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(w, "ok")
+	fmt.Println("[Main] Server stopped")
 }

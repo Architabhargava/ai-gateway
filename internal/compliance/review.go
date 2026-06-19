@@ -129,9 +129,7 @@ func (q *ReviewQueue) Poll(itemID int) ReviewStatus {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ticker.C:
+	for range ticker.C {
 			var status string
 			var expiresStr string
 

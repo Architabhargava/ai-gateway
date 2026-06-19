@@ -47,7 +47,7 @@ func NewReviewQueue(db *sql.DB) *ReviewQueue {
 
 	q := &ReviewQueue{
 		db:             db,
-		timeoutSeconds: 300, // 5 minutes — enough time to open dashboard and decide
+		timeoutSeconds: 300,
 	}
 
 	if err := q.initDB(); err != nil {
@@ -55,14 +55,12 @@ func NewReviewQueue(db *sql.DB) *ReviewQueue {
 		return q
 	}
 
-	// Background goroutine marks expired items every 10 seconds
 	go q.expireLoop()
 
 	fmt.Printf("[ReviewQueue] Initialised — timeout: %ds\n", q.timeoutSeconds)
 	return q
 }
 
-// initDB creates the review_queue table
 func (q *ReviewQueue) initDB() error {
 	_, err := q.db.Exec(`
 		CREATE TABLE IF NOT EXISTS review_queue (
@@ -84,7 +82,9 @@ func (q *ReviewQueue) initDB() error {
 	}
 
 	count := 0
-	q.db.QueryRow(`SELECT COUNT(*) FROM review_queue WHERE status = 'pending'`).Scan(&count)
+	if err := q.db.QueryRow(`SELECT COUNT(*) FROM review_queue WHERE status = 'pending'`).Scan(&count); err != nil {
+		return fmt.Errorf("failed to count pending items: %w", err)
+	}
 	fmt.Printf("[ReviewQueue] Table ready — %d pending items\n", count)
 	return nil
 }
@@ -115,9 +115,7 @@ func (q *ReviewQueue) Enqueue(auditLogID int, prompt, clientIP, category, reason
 	return int(id), nil
 }
 
-// Poll checks the database every second until a decision is made or expiry.
-// Uses pure DB polling — no in-memory channels — so the decision written
-// by HandleReview is always visible regardless of goroutine scheduling.
+// Poll checks the database every second until a decision is made or expiry
 func (q *ReviewQueue) Poll(itemID int) ReviewStatus {
 	if q.db == nil {
 		return ReviewExpired
@@ -146,26 +144,22 @@ func (q *ReviewQueue) Poll(itemID int) ReviewStatus {
 
 		switch ReviewStatus(status) {
 		case ReviewApproved:
-			fmt.Printf("[ReviewQueue] Decision: APPROVED id=%d\n", itemID)
 			return ReviewApproved
 		case ReviewRejected:
-			fmt.Printf("[ReviewQueue] Decision: REJECTED id=%d\n", itemID)
 			return ReviewRejected
 		case ReviewExpired:
-			fmt.Printf("[ReviewQueue] Decision: EXPIRED id=%d\n", itemID)
 			return ReviewExpired
 		}
 
-		// Still pending — check deadline
 		if time.Now().After(deadline) {
 			q.markExpired(itemID)
-			fmt.Printf("[ReviewQueue] Deadline passed — marking expired id=%d\n", itemID)
 			return ReviewExpired
 		}
 	}
+	return ReviewExpired
 }
 
-// Decide sets the decision on a review item — called by the admin API
+// Decide sets the decision on a review item
 func (q *ReviewQueue) Decide(itemID int, status ReviewStatus, reviewer string) error {
 	if q.db == nil {
 		return fmt.Errorf("review queue database not available")
@@ -177,15 +171,13 @@ func (q *ReviewQueue) Decide(itemID int, status ReviewStatus, reviewer string) e
 
 	now := time.Now().Format("2006-01-02 15:04:05")
 
-	// First check current status
 	var currentStatus string
-	err := q.db.QueryRow(`SELECT status FROM review_queue WHERE id = ?`, itemID).Scan(&currentStatus)
-	if err != nil {
+	if err := q.db.QueryRow(`SELECT status FROM review_queue WHERE id = ?`, itemID).Scan(&currentStatus); err != nil {
 		return fmt.Errorf("review item %d not found: %w", itemID, err)
 	}
 
 	if currentStatus != "pending" {
-		return fmt.Errorf("review item %d is already %s — cannot change decision", itemID, currentStatus)
+		return fmt.Errorf("review item %d is already %s", itemID, currentStatus)
 	}
 
 	result, err := q.db.Exec(`
@@ -200,7 +192,7 @@ func (q *ReviewQueue) Decide(itemID int, status ReviewStatus, reviewer string) e
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("review item %d could not be updated — it may have just expired", itemID)
+		return fmt.Errorf("review item %d could not be updated", itemID)
 	}
 
 	fmt.Printf("[ReviewQueue] Decision recorded id=%d status=%s reviewer=%s\n",
@@ -246,7 +238,6 @@ func (q *ReviewQueue) GetAll() ([]ReviewItem, error) {
 	return q.scanItems(rows)
 }
 
-// scanItems scans SQL rows into ReviewItem structs
 func (q *ReviewQueue) scanItems(rows *sql.Rows) ([]ReviewItem, error) {
 	var items []ReviewItem
 	for rows.Next() {
@@ -278,14 +269,12 @@ func (q *ReviewQueue) scanItems(rows *sql.Rows) ([]ReviewItem, error) {
 	return items, nil
 }
 
-// markExpired sets a pending item's status to expired
 func (q *ReviewQueue) markExpired(itemID int) {
-	q.db.Exec(`
+	_, _ = q.db.Exec(`
 		UPDATE review_queue SET status = 'expired'
 		WHERE id = ? AND status = 'pending'`, itemID)
 }
 
-// expireLoop marks overdue pending items as expired every 10 seconds
 func (q *ReviewQueue) expireLoop() {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
@@ -294,26 +283,17 @@ func (q *ReviewQueue) expireLoop() {
 			return
 		}
 		now := time.Now().Format("2006-01-02 15:04:05")
-		result, err := q.db.Exec(`
+		_, _ = q.db.Exec(`
 			UPDATE review_queue
 			SET status = 'expired'
 			WHERE status = 'pending' AND expires_at < ?`, now)
-		if err != nil {
-			continue
-		}
-		if n, _ := result.RowsAffected(); n > 0 {
-			fmt.Printf("[ReviewQueue] Expired %d overdue item(s)\n", n)
-		}
 	}
 }
 
 // Stats returns counts by status
 func (q *ReviewQueue) Stats() map[string]int {
 	stats := map[string]int{
-		"pending":  0,
-		"approved": 0,
-		"rejected": 0,
-		"expired":  0,
+		"pending": 0, "approved": 0, "rejected": 0, "expired": 0,
 	}
 	if q.db == nil {
 		return stats
@@ -333,12 +313,4 @@ func (q *ReviewQueue) Stats() map[string]int {
 		}
 	}
 	return stats
-}
-
-// truncate shortens a string for log output
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
 }

@@ -130,38 +130,37 @@ func (q *ReviewQueue) Poll(itemID int) ReviewStatus {
 	defer ticker.Stop()
 
 	for range ticker.C {
-			var status string
-			var expiresStr string
+		var status string
+		var expiresStr string
 
-			err := q.db.QueryRow(
-				`SELECT status, expires_at FROM review_queue WHERE id = ?`, itemID,
-			).Scan(&status, &expiresStr)
+		err := q.db.QueryRow(
+			`SELECT status, expires_at FROM review_queue WHERE id = ?`, itemID,
+		).Scan(&status, &expiresStr)
 
-			if err != nil {
-				fmt.Printf("[ReviewQueue] Poll DB error id=%d: %v\n", itemID, err)
-				return ReviewExpired
-			}
+		if err != nil {
+			fmt.Printf("[ReviewQueue] Poll DB error id=%d: %v\n", itemID, err)
+			return ReviewExpired
+		}
 
-			fmt.Printf("[ReviewQueue] Poll tick id=%d status=%s\n", itemID, status)
+		fmt.Printf("[ReviewQueue] Poll tick id=%d status=%s\n", itemID, status)
 
-			switch ReviewStatus(status) {
-			case ReviewApproved:
-				fmt.Printf("[ReviewQueue] Decision: APPROVED id=%d\n", itemID)
-				return ReviewApproved
-			case ReviewRejected:
-				fmt.Printf("[ReviewQueue] Decision: REJECTED id=%d\n", itemID)
-				return ReviewRejected
-			case ReviewExpired:
-				fmt.Printf("[ReviewQueue] Decision: EXPIRED id=%d\n", itemID)
-				return ReviewExpired
-			}
+		switch ReviewStatus(status) {
+		case ReviewApproved:
+			fmt.Printf("[ReviewQueue] Decision: APPROVED id=%d\n", itemID)
+			return ReviewApproved
+		case ReviewRejected:
+			fmt.Printf("[ReviewQueue] Decision: REJECTED id=%d\n", itemID)
+			return ReviewRejected
+		case ReviewExpired:
+			fmt.Printf("[ReviewQueue] Decision: EXPIRED id=%d\n", itemID)
+			return ReviewExpired
+		}
 
-			// Still pending — check deadline
-			if time.Now().After(deadline) {
-				q.markExpired(itemID)
-				fmt.Printf("[ReviewQueue] Deadline passed — marking expired id=%d\n", itemID)
-				return ReviewExpired
-			}
+		// Still pending — check deadline
+		if time.Now().After(deadline) {
+			q.markExpired(itemID)
+			fmt.Printf("[ReviewQueue] Deadline passed — marking expired id=%d\n", itemID)
+			return ReviewExpired
 		}
 	}
 }

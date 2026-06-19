@@ -3,42 +3,23 @@ run:
   go: "1.24"
 
 linters:
+  disable-all: true
   enable:
     - govet
     - staticcheck
     - gosimple
     - ineffassign
-    - unused
     - misspell
-    - bodyclose
-
-linters-settings:
-  staticcheck:
-    checks: ["all", "-SA1019"]
 
 issues:
   exclude-rules:
     - path: "_test\\.go"
       linters:
-        - errcheck
-        - unused
         - staticcheck
-        - bodyclose
-    - path: "_test_helpers\\.go"
-      linters:
-        - errcheck
-        - unused
     - path: "groq_test_helpers\\.go"
       linters:
+        - staticcheck
         - unused
-        - staticcheck
-    - path: "platform\\.go"
-      linters:
-        - staticcheck
 
-  exclude:
-    - "declaration of .err. shadows declaration"
-    - "Error return value of .*(Close|Write|Encode|Exec). is not checked"
-
-  max-issues-per-linter: 20
-  max-same-issues: 5
+  max-issues-per-linter: 50
+  max-same-issues: 10

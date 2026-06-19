@@ -92,7 +92,7 @@ func (m *IncidentManager) initDB() {
 	}
 
 	count := 0
-	m.db.QueryRow(`SELECT COUNT(*) FROM incidents WHERE resolved = 0`).Scan(&count)
+	_ = m.db.QueryRow(`SELECT COUNT(*) FROM incidents WHERE resolved = 0`).Scan(&count)
 	fmt.Printf("[Incidents] Table ready — %d unresolved incidents\n", count)
 }
 
@@ -454,8 +454,8 @@ func (m *IncidentManager) Stats() map[string]interface{} {
 	}
 
 	var total, unresolved int
-	m.db.QueryRow(`SELECT COUNT(*) FROM incidents`).Scan(&total)
-	m.db.QueryRow(`SELECT COUNT(*) FROM incidents WHERE resolved = 0`).Scan(&unresolved)
+	_ = m.db.QueryRow(`SELECT COUNT(*) FROM incidents`).Scan(&total)
+	_ = m.db.QueryRow(`SELECT COUNT(*) FROM incidents WHERE resolved = 0`).Scan(&unresolved)
 	stats["total"] = total
 	stats["unresolved"] = unresolved
 

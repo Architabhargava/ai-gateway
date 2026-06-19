@@ -72,7 +72,7 @@ func New(l *logger.Logger) *Gateway {
 				}
 				if !found {
 					// Try to insert — will fail silently if duplicate
-					km.Generate(k, "env-configured", 5, nil)
+					_, _ = km.Generate(k, "env-configured", 5, nil)
 				}
 			}
 		}
@@ -182,7 +182,7 @@ func (g *Gateway) HandleAI(w http.ResponseWriter, r *http.Request) {
 			RiskLevel: logger.RiskUnacceptable, EUArticle: prohibitedResult.Article,
 			Category: prohibitedResult.Category, ClassifierScore: prohibitedResult.Confidence,
 		})
-		go g.incidentManager.Create(0, compliance.SeverityCritical,
+		go g.incidentManager.Create(0, compliance.SeverityCritical, //nolint:errcheck
 			prohibitedResult.Category, prohibitedResult.Article, prompt, clientIP, reason)
 
 		w.WriteHeader(http.StatusUnavailableForLegalReasons)
@@ -261,7 +261,7 @@ func (g *Gateway) HandleAI(w http.ResponseWriter, r *http.Request) {
 			Category: classifyResult.Category, ClassifierScore: classifyResult.Score,
 		})
 		severity := compliance.DetermineSeverity(classifyResult.RiskLevel, classifyResult.Category, classifyResult.EUArticle)
-		go g.incidentManager.Create(0, severity, classifyResult.Category, classifyResult.EUArticle, prompt, clientIP, reason)
+		go g.incidentManager.Create(0, severity, classifyResult.Category, classifyResult.EUArticle, prompt, clientIP, reason) //nolint:errcheck
 
 		w.WriteHeader(http.StatusForbidden)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -665,7 +665,7 @@ func (g *Gateway) HandleAuditDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var id int
-	fmt.Sscanf(parts[2], "%d", &id)
+	_, _ = fmt.Sscanf(parts[2], "%d", &id)
 	if id == 0 {
 		w.WriteHeader(http.StatusBadRequest)
 		return

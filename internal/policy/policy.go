@@ -73,7 +73,7 @@ func (e *Engine) initDB() {
 		return
 	}
 	count := 0
-	e.db.QueryRow(`SELECT COUNT(*) FROM blocked_rules`).Scan(&count)
+	_ = e.db.QueryRow(`SELECT COUNT(*) FROM blocked_rules`).Scan(&count)
 	fmt.Printf("[Policy] Policy engine ready — %d keyword rules\n", count)
 }
 

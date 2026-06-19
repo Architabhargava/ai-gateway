@@ -121,7 +121,7 @@ func (d *Dashboard) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html")
-		tmpl.Execute(w, data)
+		_ = tmpl.Execute(w, data)
 		return
 	}
 

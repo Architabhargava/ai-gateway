@@ -259,7 +259,7 @@ func (m *RetentionManager) StorageStats() map[string]interface{} {
 
 	var count int
 
-	m.db.QueryRow(`SELECT COUNT(*) FROM audit_logs`).Scan(&count)
+	_ = m.db.QueryRow(`SELECT COUNT(*) FROM audit_logs`).Scan(&count)
 	stats["audit_logs"] = count
 
 	m.db.QueryRow(`SELECT COUNT(*) FROM incidents`).Scan(&count)

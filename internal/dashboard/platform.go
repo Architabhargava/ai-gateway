@@ -461,6 +461,9 @@ tr:hover td{background:#0f0f1a}
       <i class="ti ti-key nav-icon" aria-hidden="true"></i> API Keys
       <span class="nav-badge warn" id="keys-count" style="display:none">0</span>
     </button>
+	<button class="nav-item" onclick="window.open('/metrics-dashboard','_blank')" id="nav-metrics">
+  	  <i class="ti ti-chart-bar nav-icon" aria-hidden="true"></i> Metrics
+	</button>
     <button class="nav-item" onclick="showPage('retention')" id="nav-retention">
       <i class="ti ti-database nav-icon" aria-hidden="true"></i> Retention &amp; GDPR
     </button>

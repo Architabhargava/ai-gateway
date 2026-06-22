@@ -57,24 +57,36 @@ func main() {
 		fmt.Fprintln(w, "ok")
 	})
 
-	// ── Prometheus metrics endpoint ───────────────────────────────────────
-	// Exposes all registered metrics in Prometheus text format.
-	// Scraped by Grafana Cloud every 15 seconds.
-	// No auth on purpose — metrics contain no sensitive data,
-	// only aggregate counts and histograms.
+	// Prometheus metrics — no auth, aggregate data only, no sensitive info
 	mux.Handle("/metrics", promhttp.Handler())
 
 	// ── Admin routes (HTTP Basic Auth) ────────────────────────────────────
 	mux.HandleFunc("/platform", adminAuth.Middleware(dash.HandlePlatform))
 	mux.HandleFunc("/dashboard", adminAuth.Middleware(dash.HandleDashboard))
+
+	// Metrics dashboard UI + data API
+	mux.HandleFunc("/metrics-dashboard", adminAuth.Middleware(dash.HandleMetricsPage))
+	mux.HandleFunc("/admin/metrics-data", adminAuth.Middleware(gw.HandleMetricsAPI))
+
+	// Audit
 	mux.HandleFunc("/admin/audit/", adminAuth.Middleware(gw.HandleAuditDetail))
+
+	// Rules
 	mux.HandleFunc("/admin/rules", adminAuth.Middleware(gw.HandleRules))
+
+	// Review queue
 	mux.HandleFunc("/admin/review", adminAuth.Middleware(gw.HandleReview))
 	mux.HandleFunc("/admin/review/", adminAuth.Middleware(gw.HandleReview))
+
+	// Incidents
 	mux.HandleFunc("/admin/incidents", adminAuth.Middleware(gw.HandleIncidents))
 	mux.HandleFunc("/admin/incidents/", adminAuth.Middleware(gw.HandleIncidents))
+
+	// Retention
 	mux.HandleFunc("/admin/retention", adminAuth.Middleware(gw.HandleRetention))
 	mux.HandleFunc("/admin/retention/", adminAuth.Middleware(gw.HandleRetention))
+
+	// API keys
 	mux.HandleFunc("/admin/keys", adminAuth.Middleware(gw.HandleKeys))
 	mux.HandleFunc("/admin/keys/", adminAuth.Middleware(gw.HandleKeys))
 
@@ -93,16 +105,10 @@ func main() {
 
 	go func() {
 		fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-		fmt.Printf("  Listening on http://localhost:%s\n", port)
+		fmt.Printf("  http://localhost:%s\n", port)
 		fmt.Println("")
-		fmt.Println("  PUBLIC:")
-		fmt.Println("    /          Chat UI")
-		fmt.Println("    /ai        Gateway endpoint")
-		fmt.Println("    /metrics   Prometheus metrics")
-		fmt.Println("    /health    Liveness probe")
-		fmt.Println("")
-		fmt.Println("  ADMIN (Basic Auth):")
-		fmt.Println("    /platform  Admin platform")
+		fmt.Println("  PUBLIC:  /  /ai  /metrics  /health")
+		fmt.Println("  ADMIN:   /platform  /metrics-dashboard")
 		fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -113,16 +119,13 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-quit
-
 	fmt.Printf("\n[Main] Signal %s — shutting down gracefully...\n", sig)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
 	if err := srv.Shutdown(ctx); err != nil {
 		fmt.Printf("[Main] Forced shutdown: %v\n", err)
 	}
-
 	l.Close()
-	fmt.Println("[Main] Server stopped")
+	fmt.Println("[Main] Stopped")
 }

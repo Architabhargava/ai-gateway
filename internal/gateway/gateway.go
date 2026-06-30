@@ -29,6 +29,7 @@ type Gateway struct {
 	retentionManager *compliance.RetentionManager
 	logger           *logger.Logger
 	apiKey           string
+	responseScanner  *compliance.ResponseScanner
 }
 
 // New wires together all gateway dependencies
@@ -75,6 +76,7 @@ func New(l *logger.Logger) *Gateway {
 		retentionManager: compliance.NewRetentionManager(db),
 		logger:           l,
 		apiKey:           apiKey,
+		responseScanner:  compliance.NewResponseScanner(apiKey),
 	}
 }
 
@@ -144,6 +146,14 @@ func (g *Gateway) HandleAI(w http.ResponseWriter, r *http.Request) {
 	clientIP := r.RemoteAddr
 	rawKey := r.Header.Get("X-API-Key")
 
+	// ── Step 2.5: Prompt normalisation ───────────────────────────────────────
+	normResult := compliance.NormalisePrompt(prompt)
+	if normResult.Suspicious {
+		fmt.Printf("[Normaliser] Evasion detected — flags: %v\n", normResult.Flags)
+	}
+	// Use normalised version for classification, log original
+	classifyPrompt := normResult.Normalised
+
 	// ── Step 3: Per-key rate limiting ─────────────────────────────────────
 	if allowed, limitReason := g.policy.Check(rawKey, prompt, keyRecord.RateLimit); !allowed {
 		fmt.Printf("[Policy] Rate limited — key: %s\n", keyRecord.Name)
@@ -160,7 +170,7 @@ func (g *Gateway) HandleAI(w http.ResponseWriter, r *http.Request) {
 
 	// ── Step 4: Article 5 prohibited use detector ─────────────────────────
 	fmt.Println("[Prohibited] Checking Article 5 categories")
-	prohibitedResult := g.prohibited.Check(prompt)
+	prohibitedResult := g.prohibited.Check(classifyPrompt)
 
 	if prohibitedResult.IsProhibited && prohibitedResult.Confidence >= 0.7 {
 		reason := fmt.Sprintf("EU AI Act %s violation — %s: %s",
@@ -196,7 +206,7 @@ func (g *Gateway) HandleAI(w http.ResponseWriter, r *http.Request) {
 	// ── Step 5: AI intent classifier ─────────────────────────────────────
 	fmt.Println("[Policy] Running AI intent classifier")
 	classifyStart := time.Now()
-	classifyResult := g.policy.ClassifyWithAI(prompt)
+	classifyResult := g.policy.ClassifyWithAI(classifyPrompt)
 	metrics.ClassifierDuration.Observe(time.Since(classifyStart).Seconds())
 
 	riskLevel := mapRiskLevel(classifyResult.RiskLevel)
@@ -331,6 +341,28 @@ func (g *Gateway) HandleAI(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "success", "prompt": prompt, "response": response, "risk_level": classifyResult.RiskLevel,
 	})
+
+	// ── Step 6.5: Response scanning ──────────────────────────────────────────
+	scanResult := g.responseScanner.Scan(prompt, response)
+	if scanResult.IsHarmful && scanResult.Score >= 0.7 {
+		reason := fmt.Sprintf("[output-scan] %s: %s", scanResult.Category, scanResult.Reason)
+		fmt.Printf("[ResponseScanner] BLOCKED — %s\n", reason)
+		g.writeLog(logger.LogEntry{
+			ClientIP: clientIP, Prompt: prompt, Status: "blocked", Blocked: true,
+			Reason: reason, RiskLevel: logger.RiskHigh,
+			Category: scanResult.Category,
+		})
+		severity := compliance.DetermineSeverity("high", scanResult.Category, "")
+		go g.incidentManager.Create(0, severity, scanResult.Category, "",
+			prompt, clientIP, reason)
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":   "blocked",
+			"reason":   "response contained harmful content — blocked at output layer",
+			"category": scanResult.Category,
+		})
+		return
+	}
 }
 
 // HandleKeys manages API keys

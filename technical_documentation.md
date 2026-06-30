@@ -590,3 +590,95 @@ Beyond compliance, there is a product reason. An AI gateway that can issue, revo
 ---
 
 *This documentation covers the complete technical design, implementation decisions, and operational lessons from building the AI Gateway. For setup instructions and API reference, see [README.md](./README.md).*
+
+---
+
+## Addendum — Features added after initial documentation
+
+### Feature 6 — API key management system (expanded)
+
+**What was added beyond the original design:**
+
+The key management system grew significantly beyond simple key validation. Each key now carries:
+
+- **Lifecycle state machine:** active → suspended → active (reversible) or active → revoked (permanent). The state machine is enforced at both the database and in-memory cache layers.
+- **Per-key rate limit:** stored in the `api_keys` table, read on every request, overrides the system default if set.
+- **Usage tracking:** `request_count` and `block_count` increment in background goroutines on every request — never blocking the response path.
+- **In-memory cache:** all active keys are loaded into a `map[string]*APIKey` on startup. Validation is O(1) — no database round-trip on the hot path.
+- **Key masking in list views:** the full key value is shown exactly once on generation. All subsequent list/get responses show a masked version (`gw_abc...xyz`) — the same UX pattern used by Stripe, OpenAI, and Anthropic.
+
+**Two separate auth systems:**
+
+The project has two completely independent authentication mechanisms serving different purposes:
+
+| Mechanism | Used for | How it works |
+|---|---|---|
+| `gw_` API keys | User requests to `/ai` | X-API-Key header, validated against KeyManager cache |
+| HTTP Basic Auth | Admin access to `/platform` | WWW-Authenticate header, constant-time comparison |
+
+Neither system knows about the other. A user with a valid `gw_` key cannot access `/platform`. An admin with HTTP Basic Auth credentials cannot send requests to `/ai` without also having a `gw_` key.
+
+---
+
+### Feature 7 — Metrics dashboard
+
+**The problem with Grafana Cloud:**
+
+The initial plan was to use Grafana Cloud to visualise the Prometheus `/metrics` endpoint. This required Grafana Alloy — a scraping agent that needs to run on a machine with network access to the `/metrics` endpoint. On Render free tier (which sleeps after 15 minutes of inactivity), a remotely-hosted scraper would frequently time out trying to reach a sleeping instance.
+
+More fundamentally, Grafana Cloud requires installing and running a separate process (Alloy) to scrape metrics and push them to Grafana's hosted Prometheus. For a portfolio project, this creates an unnecessary operational dependency.
+
+**The solution — built-in Chart.js dashboard:**
+
+Instead of an external observability platform, a metrics dashboard was built directly into the admin platform at `/metrics-dashboard`. It:
+
+- Computes all metrics at query time from the SQLite audit log
+- Uses Chart.js 4.4 loaded from CDN — no npm, no build step
+- Polls `/admin/metrics-data` every 10 seconds
+- Works correctly regardless of Render's sleep/wake cycle
+- Requires no external accounts, no agents, no infrastructure
+
+**Six charts:**
+
+| Chart | Type | Data source |
+|---|---|---|
+| Requests by hour | Stacked bar | audit_logs grouped by hour, last 24h |
+| Risk level breakdown | Doughnut | audit_logs grouped by risk_level |
+| Daily request trend | Line (2 series) | audit_logs grouped by day, last 7 days |
+| Block rate % over 7 days | Line | blocked/total per day |
+| Blocked by category | Horizontal bar | audit_logs where blocked=1, grouped by category |
+| Classifier score distribution | Bar | audit_logs bucketed into 5 score ranges |
+
+**The `/metrics` endpoint is still valuable:**
+
+Even though Grafana Cloud was not connected, the Prometheus `/metrics` endpoint remains in the codebase and is live on Render. It exposes 12 metric series including request counters, latency histograms, and gauges. Any future Prometheus-compatible collector (self-hosted Prometheus, Datadog agent, Victoria Metrics) can scrape it immediately. The instrumentation is done — the collection infrastructure can be added later.
+
+---
+
+### Challenge 6 — Grafana Cloud scraping Render free tier
+
+**The problem:**  
+Grafana Cloud's built-in scraper requires a Prometheus server URL. When pointed at the gateway's `/metrics` endpoint directly, it returns a 404 because Grafana Cloud expects a Prometheus query API (at `/api/v1/query`), not a raw metrics endpoint.
+
+The correct setup requires Grafana Alloy running locally or on a server that can reach the metrics endpoint and push data to Grafana's hosted Prometheus (Mimir). However, Render free tier sleeps after 15 minutes of inactivity, which means any persistent scraping agent would frequently hit timeouts on a sleeping instance.
+
+**How it was solved:**  
+Abandoned external observability entirely in favour of a self-contained metrics dashboard. The dashboard queries the same SQLite database that the application uses — no scraping, no agents, no external service. The data is always available because it is the application's own data. The Prometheus `/metrics` endpoint remains exposed for future use but is not actively scraped.
+
+**What this taught:**  
+The right tool depends on the deployment environment. Prometheus + Grafana is the correct observability stack for always-on infrastructure. For an ephemeral free-tier deployment, a built-in dashboard that queries the application's own database is more reliable than a scraping-based external service.
+
+---
+
+### DevOps challenge addendum — Render Go vs Docker buildpack
+
+**What happened:**  
+When the Render service was first created, Render auto-detected the Go source code and used its native Go buildpack. The buildpack compiled the binary correctly but produced a file named `app` without execute permissions. Every deploy failed with `bash: ./app: Permission denied` (exit code 126).
+
+The `render.yaml` file specifying `runtime: docker` was present in the repository but was ignored because Render had already classified the service as a Go buildpack service when it was created.
+
+**How it was solved:**  
+The service was deleted and recreated with Docker explicitly selected during the creation wizard. Render's auto-detection only runs at service creation time — it cannot be overridden by `render.yaml` for an existing service. Once created as a Docker service, Render correctly used the `Dockerfile` and the binary executed without permission errors.
+
+**The lesson:**  
+Infrastructure-as-code tools like `render.yaml` define the desired state but may not override state that was set interactively during service creation. When a deployment behaves unexpectedly, check whether the service was created with the correct runtime type — sometimes recreating the service is faster than debugging configuration.

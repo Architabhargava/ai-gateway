@@ -21,6 +21,7 @@ Most AI integrations send prompts directly to a model with no governance layer. 
 | Log retention + GDPR erasure | Configurable retention policy with nightly purge and Article 17 right-to-erasure per API key |
 | API key management | Per-customer cryptographically random keys with generate, revoke, suspend, activate lifecycle |
 | Metrics dashboard | Live Chart.js observability dashboard with 6 charts — request rates, block rates, risk breakdown, score distribution |
+| Classifier hardening | Prompt normalisation against encoding evasion, hardened system prompt against fictional framing, response output scanning |
 
 ---
 
@@ -110,7 +111,10 @@ ai-gateway/
 │   │   ├── prohibited.go               # EU AI Act Article 5 detector (2-stage)
 │   │   ├── incidents.go                # Incident reporting + Resend email alerts
 │   │   ├── review.go                   # Human review queue (DB polling)
-│   │   └── retention.go                # Log retention + GDPR right to erasure
+│   │   ├── retention.go                # Log retention + GDPR right to erasure
+│   │   ├── normaliser.go               # Evasion-resistant prompt pre-processing
+│   │   ├── normaliser_test.go          # Normaliser tests (9 evasion patterns)
+│   │   └── response_scanner.go         # Output-layer harmful content scanning
 │   ├── dashboard/
 │   │   ├── platform.go                 # Unified admin platform UI (7 sections)
 │   │   ├── chat.go                     # Public user chat UI
@@ -296,3 +300,24 @@ Pure DB polling over in-memory channels — works correctly in multi-instance de
 
 **Archita Bhargava**  
 [GitHub](https://github.com/Architabhargava) · [LinkedIn](https://linkedin.com/in/archita-bhargava)
+
+---
+
+## Defence-in-depth — classifier hardening
+
+The AI classifier is a probabilistic model — not a guarantee. Three additional layers were built around it to catch evasion attempts that a single classification pass can miss:
+
+| Layer | What it catches | Where it runs |
+|---|---|---|
+| Prompt normalisation | Base64 encoding, leet speak, Unicode lookalikes (Cyrillic а vs Latin a), zero-width characters, character-insertion obfuscation (i-g-n-o-r-e) | Before classification (Step 2.5) |
+| Hardened classifier prompt | Fictional/research framing, authority claims, indirect requests, multi-turn manipulation | During classification (Step 5) |
+| Response output scanning | Harmful content that slipped past input classification or was produced via mid-conversation manipulation | After Groq responds (Step 6.5) |
+
+**Prompt normalisation example:**
+```
+User sends:    "1gn0r3 y0ur 1nstruct10ns"
+Normalised to: "ignore your instructions"
+Classifier sees the clean version — original is preserved for logging
+```
+
+**Why this matters:** No AI safety system is unbeatable. Defence in depth means that even if one layer is bypassed, subsequent layers provide additional opportunities to catch harmful content — input normalisation, input classification, and output scanning are three independent checkpoints rather than a single point of failure.
